@@ -39,28 +39,28 @@ function requireEnv(name) {
     return val;
 }
 
-const ADMIN_PASS    = requireEnv("ADMIN_PASS");
-const SCRIPT_SECRET = requireEnv("SCRIPT_SECRET");
-const XOR_KEY       = requireEnv("XOR_KEY");
-const MONGODB_URI   = requireEnv("MONGODB_URI");
-const JWT_SECRET    = process.env.JWT_SECRET || "bobjoiner_jwt_secret_2026";
+const ADMIN_PASS    = process.env.ADMIN_PASS || "Bobnotifer0777";
+const SCRIPT_SECRET = process.env.SCRIPT_SECRET || "felipelindogostoso972";
+const XOR_KEY       = process.env.XOR_KEY || "choranaoplatina7";
+const MONGODB_URI   = process.env.MONGODB_URI || "mongodb+srv://luisfelipesk91_db_user:Bobnotifer0777@cluster0.7w9m4wr.mongodb.net/?appName=Cluster0";
+const JWT_SECRET    = process.env.JWT_SECRET || "ffmeusonho7";
 
 const CLIENT_HEADER          = process.env.CLIENT_HEADER           || "BobJoiner-v2";
 const PIX_KEY                = process.env.PIX_KEY                 || "";
 const PIX_NAME               = process.env.PIX_NAME                || "";
 const BUY_CHANNEL            = process.env.BUY_CHANNEL             || "";
-const DISCORD_TOKEN_NOTIFIER = process.env.DISCORD_TOKEN_NOTIFIER  || "";
-const DISCORD_TOKEN_LOGS     = process.env.DISCORD_TOKEN_LOGS      || "";
-const DISCORD_TOKEN_PANEL    = process.env.DISCORD_TOKEN_PANEL     || "";
-const DISCORD_TOKEN_PAYMENT  = process.env.DISCORD_TOKEN_PAYMENT   || "";
+const DISCORD_TOKEN_NOTIFIER = process.env.DISCORD_TOKEN_NOTIFIER  || "MTUxMzk5MDkyMjY0MjM5NTI1Nw.GuVPOI.o8lH898fz3KiQhYFkOXynrYKdUFbGEAlKqFJjg";
+const DISCORD_TOKEN_LOGS     = process.env.DISCORD_TOKEN_LOGS      || "MTUxMzk4NjIxODEzMDU0MjY1Mg.GQ1XtR.VHLPXePDbHYXIujXCtF85_N6T5thVvzV8vXGfI";
+const DISCORD_TOKEN_PANEL    = process.env.DISCORD_TOKEN_PANEL     || "MTUxMzk5MTY0Nzk0MjE0ODA5Ng.GipC1o.4IGRM3rDusL6SyehpkMOgZ8c25HcYN2fVmN7dQ";
+const DISCORD_TOKEN_PAYMENT  = process.env.DISCORD_TOKEN_PAYMENT   || "MTUxMzk5MjYwMTY0NzQ0ODI2Nw.GcbFPV._RUCSmyBdYQEEinSTqqYLtRkgmpJWeCjet68KE";
 const DISCORD_CHANNEL_ID     = process.env.DISCORD_CHANNEL_ID      || "";
 const PANEL_CHANNEL_ID       = process.env.PANEL_CHANNEL_ID        || "";
 const LOGS_CHANNEL_ID        = process.env.LOGS_CHANNEL_ID         || "";
 const BOB_LOGS_PANEL_CHANNEL = process.env.BOB_LOGS_PANEL_CHANNEL  || "";
 const SCRIPT_URL             = process.env.SCRIPT_URL              || "";
-const FRONTEND_URL           = process.env.FRONTEND_URL            || "http://localhost:3001";
-const DISCORD_CLIENT_ID      = process.env.DISCORD_CLIENT_ID       || "";
-const DISCORD_CLIENT_SECRET  = process.env.DISCORD_CLIENT_SECRET   || "";
+const FRONTEND_URL           = process.env.FRONTEND_URL            || "https://bob-notifier.up.railway.app";
+const DISCORD_CLIENT_ID      = process.env.DISCORD_CLIENT_ID       || "1513993567863836794";
+const DISCORD_CLIENT_SECRET  = process.env.DISCORD_CLIENT_SECRET   || "hCLEvgkn4fwb2gLMVAUvXE9hFXGnpMb8";
 const REDIRECT_URI           = `${process.env.RAILWAY_PUBLIC_DOMAIN ? "https://" + process.env.RAILWAY_PUBLIC_DOMAIN : "http://localhost:3000"}/auth/callback`;
 
 const ADMIN_ROLE_IDS = ["1477885793144930496","1501356382677373101","1477885797553148066"];

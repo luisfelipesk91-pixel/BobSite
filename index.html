@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bob Joiner — Loja</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#02060F;--navy2:#060D1E;--navy3:#0A1428;--navy4:#0F1D3A;--navy5:#152449;
+  --blue:#1E6FD9;--blue2:#2D8EFF;--blue3:#5AA8FF;--blue4:#8CC4FF;
+  --glow:rgba(30,111,217,0.18);--glow2:rgba(45,142,255,0.08);
+  --text:#C8DCF4;--text2:#7A9EC8;--text3:#3A5878;
+  --green:#22D47E;--green-bg:rgba(34,212,126,0.08);--green-border:rgba(34,212,126,0.25);
+  --red:#F05A5A;--red-bg:rgba(240,90,90,0.08);--red-border:rgba(240,90,90,0.25);
+  --amber:#F0A52A;--amber-bg:rgba(240,165,42,0.08);--amber-border:rgba(240,165,42,0.25);
+  --border:rgba(30,111,217,0.14);--border2:rgba(30,111,217,0.28);--border3:rgba(30,111,217,0.45);
+  --r:14px;
+}
+body{font-family:"Space Grotesk",sans-serif;background:var(--navy);color:var(--text);min-height:100vh;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(30,111,217,.12) 0%,transparent 70%),radial-gradient(ellipse 40% 30% at 80% 80%,rgba(30,111,217,.06) 0%,transparent 60%);pointer-events:none;z-index:0}
+body::after{content:"";position:fixed;inset:0;background-image:linear-gradient(rgba(30,111,217,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(30,111,217,.045) 1px,transparent 1px);background-size:48px 48px;pointer-events:none;z-index:0}
+
+/* LOADING */
+#loading{position:fixed;inset:0;background:var(--navy);display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:16px}
+.spin-loader{width:38px;height:38px;border:2.5px solid var(--navy5);border-top-color:var(--blue2);border-radius:50%;animation:spinning .7s linear infinite}
+@keyframes spinning{to{transform:rotate(360deg)}}
+.load-text{font-size:13px;color:var(--text3);font-family:"JetBrains Mono",monospace;letter-spacing:.08em}
+
+/* LOGIN */
+#login-page{display:none;min-height:100vh;align-items:center;justify-content:center;flex-direction:column;gap:32px;padding:24px;background:radial-gradient(ellipse at 50% -10%,rgba(30,111,217,.2) 0%,transparent 60%),radial-gradient(ellipse at 80% 80%,rgba(90,60,200,.1) 0%,transparent 50%)}
+.login-card{background:var(--navy2);border:1px solid var(--border2);border-radius:22px;padding:52px 44px;text-align:center;max-width:420px;width:100%;box-shadow:0 0 80px rgba(30,111,217,.1)}
+.login-card h1{font-size:26px;font-weight:700;margin-bottom:6px;letter-spacing:.04em}
+.login-card h1 em{color:var(--blue3);font-style:normal}
+.login-card p{color:var(--text2);font-size:13px;margin-bottom:32px;line-height:1.65}
+.login-features{display:flex;flex-direction:column;gap:9px;margin-bottom:34px;text-align:left}
+.login-feat{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text2)}
+.login-feat-dot{width:5px;height:5px;border-radius:50%;background:var(--blue2);flex-shrink:0}
+.btn-discord{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 24px;background:var(--blue2);border:none;border-radius:11px;color:#02060F;font-family:"Space Grotesk",sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s;letter-spacing:.04em}
+.btn-discord:hover{background:var(--blue3);transform:translateY(-1px);box-shadow:0 8px 28px rgba(45,142,255,.3)}
+.btn-discord svg{width:20px;height:20px;fill:#02060F}
+
+/* NAV */
+nav{position:sticky;top:0;z-index:200;display:flex;align-items:center;justify-content:space-between;padding:0 2.5rem;height:66px;background:rgba(2,6,15,.88);backdrop-filter:blur(24px);border-bottom:1px solid var(--border)}
+.logo{display:flex;align-items:center;gap:11px}
+.logo-img{width:40px;height:40px;border-radius:50%;object-fit:cover;border:1.5px solid var(--border2);box-shadow:0 0 14px var(--glow);background:var(--navy4)}
+.logo-name{font-size:17px;font-weight:700;letter-spacing:.1em;color:var(--text)}
+.logo-name em{color:var(--blue3);font-style:normal}
+.nav-r{display:flex;align-items:center;gap:16px}
+.chip{display:flex;align-items:center;gap:8px;padding:6px 14px;border:1px solid var(--border);border-radius:999px;background:rgba(30,111,217,.06)}
+.chip-av{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#0F1D3A,#1E4A8A);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--blue3);overflow:hidden}
+.chip-av img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.chip-name{font-size:12px;font-family:"JetBrains Mono",monospace;color:var(--text2)}
+.btn-sair{background:none;border:none;cursor:pointer;font-size:12px;font-family:"Space Grotesk",sans-serif;font-weight:500;letter-spacing:.06em;color:var(--text3);transition:color .2s}
+.btn-sair:hover{color:var(--red)}
+
+/* LAYOUT */
+main{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:2.5rem 2rem 5rem;display:grid;grid-template-columns:2fr 1fr;gap:1.25rem}
+.col-left{display:flex;flex-direction:column;gap:1.25rem}
+.col-right{display:flex;flex-direction:column;gap:1.25rem}
+
+/* CARDS */
+.card{background:var(--navy2);border:1px solid var(--border);border-radius:var(--r);padding:1.5rem 1.6rem;position:relative;overflow:hidden;transition:border-color .25s,transform .25s;animation:fadeUp .5s ease both}
+.card::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--blue) 50%,transparent);opacity:0;transition:opacity .3s}
+.card:hover{border-color:var(--border2);transform:translateY(-2px)}
+.card:hover::before{opacity:.5}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+
+.label{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--text3);margin-bottom:1.1rem}
+.label::before{content:"";display:block;width:2px;height:13px;background:var(--blue2);border-radius:2px}
+
+/* SALDO */
+.top-row{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem}
+.saldo-num{font-size:48px;font-weight:700;font-family:"JetBrains Mono",monospace;color:var(--blue3);letter-spacing:-2px;line-height:1;margin-bottom:.35rem}
+.saldo-num .cur{font-size:20px;color:var(--text3);font-weight:400;vertical-align:top;margin-top:7px;display:inline-block}
+.saldo-sub{font-size:12px;color:var(--text3)}
+.saldo-icon{position:absolute;right:1.5rem;top:1.5rem;width:46px;height:46px;border-radius:11px;background:rgba(30,111,217,.1);border:1px solid var(--border);display:flex;align-items:center;justify-content:center}
+
+/* KEY CARD — LUARMOR STYLE */
+.chave-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.9rem}
+.chave-title{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600}
+.status{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.status.off{background:var(--red-bg);border:1px solid var(--red-border);color:var(--red)}
+.status.on{background:var(--green-bg);border:1px solid var(--green-border);color:var(--green)}
+.status-dot{width:5px;height:5px;border-radius:50%;background:currentColor;animation:pulse 2s ease infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* Script box estilo LuArmor */
+.key-script-box{background:#040A16;border:1px solid rgba(30,111,217,.2);border-radius:10px;padding:16px 18px;font-family:"JetBrains Mono",monospace;font-size:.78rem;line-height:1.9;color:#7A9EC8;position:relative;margin-bottom:12px}
+.key-script-box .eye-btn{position:absolute;top:11px;right:11px;background:transparent;border:none;cursor:pointer;color:var(--text3);transition:.2s;padding:4px}
+.key-script-box .eye-btn:hover{color:var(--text)}
+.key-script-box .eye-btn svg{width:15px;height:15px}
+.ks-purple{color:#c084fc}
+.ks-blue{color:#7dd3fc}
+.ks-yellow{color:#fbbf24}
+.ks-gray{color:#475569}
+.ks-white{color:#C8DCF4}
+.ks-load{color:#64748b;word-break:break-all;font-size:.72rem;margin-top:6px;display:block}
+.key-no-msg{font-size:13px;line-height:1.65;color:var(--text2);padding:4px 0}
+.key-no-msg strong{color:var(--text);font-weight:500}
+.key-box-no{margin-top:.85rem;padding:.65rem 1rem;background:var(--navy3);border:1px dashed var(--border);border-radius:8px;font-size:11px;font-family:"JetBrains Mono",monospace;color:var(--text3);display:flex;align-items:center;gap:9px}
+
+.btn-copy-script{width:100%;background:transparent;border:1px solid rgba(192,132,252,.25);color:#c084fc;padding:12px;border-radius:10px;font-family:"Space Grotesk",sans-serif;font-size:.88rem;font-weight:600;cursor:pointer;transition:.2s;display:flex;align-items:center;justify-content:center;gap:8px}
+.btn-copy-script:hover{background:rgba(192,132,252,.07);border-color:#c084fc}
+.btn-copy-script svg{width:15px;height:15px}
+
+/* KEY TIME BADGE */
+.key-time-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.key-time-badge{font-family:"JetBrains Mono",monospace;font-size:18px;font-weight:700;color:var(--text)}
+.key-paused{color:var(--amber);font-size:11px;font-family:"JetBrains Mono",monospace}
+
+/* STATS */
+.stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
+.stat{background:var(--navy2);border:1px solid var(--border);border-radius:var(--r);padding:1.1rem 1.3rem;display:flex;align-items:center;gap:.85rem;transition:all .25s;animation:fadeUp .5s ease both}
+.stat:hover{border-color:var(--border2);transform:translateY(-2px)}
+.stat-ic{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:rgba(30,111,217,.1);border:1px solid var(--border);flex-shrink:0}
+.stat-v{font-size:20px;font-weight:700;font-family:"JetBrains Mono",monospace;color:var(--text);letter-spacing:-.5px}
+.stat-l{font-size:10px;color:var(--text3);margin-top:2px;letter-spacing:.04em}
+
+/* SLOTS */
+.slots-row{display:flex;align-items:center;gap:1.25rem}
+.slots-big{display:flex;align-items:baseline;gap:3px;flex-shrink:0}
+.slots-n{font-size:40px;font-weight:700;font-family:"JetBrains Mono",monospace;color:var(--text);letter-spacing:-1px}
+.slots-sep{font-size:20px;color:var(--text3)}
+.slots-t{font-size:20px;font-family:"JetBrains Mono",monospace;color:var(--text3)}
+.slots-desc{font-size:11px;color:var(--text3);flex-shrink:0}
+.bar-wrap{flex:1}
+.bar-label{display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-bottom:5px}
+.bar-bg{height:5px;background:var(--navy5);border-radius:4px;overflow:hidden}
+.bar-fill{height:100%;width:0%;background:linear-gradient(90deg,#0F4DA8,var(--blue2));border-radius:4px;transition:width 1.2s cubic-bezier(.4,0,.2,1)}
+.btn-icon{display:flex;align-items:center;gap:7px;padding:8px 14px;border:1px solid var(--border);border-radius:9px;background:transparent;color:var(--text2);font-family:"Space Grotesk",sans-serif;font-size:12px;font-weight:500;cursor:pointer;transition:all .2s;flex-shrink:0}
+.btn-icon:hover{border-color:var(--border2);color:var(--blue3)}
+.spin-btn{transition:transform .5s}
+
+/* PLANOS */
+.planos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.85rem;margin-top:.25rem}
+.plano{background:var(--navy3);border:1.5px solid var(--border);border-radius:12px;padding:1.3rem 1rem;cursor:pointer;position:relative;overflow:hidden;transition:all .2s;text-align:center}
+.plano:hover:not(.disabled){border-color:var(--border2);background:var(--navy4);transform:translateY(-2px)}
+.plano.active{border-color:var(--blue2);background:rgba(30,111,217,.07)}
+.plano.active::after{content:"";position:absolute;inset:0;background:linear-gradient(135deg,rgba(30,111,217,.06),transparent);pointer-events:none}
+.plano.disabled{opacity:.4;cursor:not-allowed}
+.pop-tag{position:absolute;top:0;left:50%;transform:translateX(-50%);background:var(--blue2);color:#02060F;font-size:8px;font-weight:800;letter-spacing:.18em;padding:3px 14px;border-radius:0 0 8px 8px;white-space:nowrap}
+.plano-icon{font-size:24px;margin-bottom:.5rem;display:block}
+.plano-h{font-size:17px;font-weight:700;color:var(--text);margin-bottom:.1rem}
+.plano-h span{font-size:10px;color:var(--text3);font-weight:400}
+.plano-p{font-size:24px;font-weight:700;font-family:"JetBrains Mono",monospace;color:var(--blue3);letter-spacing:-1px;margin-top:.4rem}
+.plano-p sub{font-size:12px;color:var(--text3);font-weight:400;vertical-align:baseline}
+.plano-rate{font-size:10px;color:var(--text3);margin-top:.2rem}
+
+/* COMPRAR */
+.buy-section{margin-top:1rem;padding:1rem 1.2rem;background:var(--navy3);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
+.buy-info-line{font-size:13px;color:var(--text2)}
+.buy-info-line strong{color:var(--text);font-weight:600}
+.btn-buy{display:flex;align-items:center;gap:8px;padding:12px 24px;background:var(--blue2);border:none;border-radius:11px;color:#02060F;font-family:"Space Grotesk",sans-serif;font-size:13px;font-weight:700;letter-spacing:.04em;cursor:pointer;transition:all .2s;white-space:nowrap;flex-shrink:0}
+.btn-buy:hover:not(:disabled){background:var(--blue3);transform:translateY(-1px);box-shadow:0 6px 20px rgba(45,142,255,.3)}
+.btn-buy:disabled{opacity:.5;cursor:not-allowed}
+
+/* HISTÓRICO */
+.hist-list{margin-top:.25rem}
+.hist-item{display:flex;justify-content:space-between;align-items:center;padding:.85rem 0;border-bottom:1px solid var(--border);transition:padding .15s}
+.hist-item:last-child{border-bottom:none}
+.hist-item:hover{padding-left:.35rem}
+.hist-l{display:flex;align-items:center;gap:12px}
+.hist-ic{width:36px;height:36px;border-radius:9px;background:rgba(30,111,217,.08);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+.hist-name{font-size:13px;font-weight:600;color:var(--text)}
+.hist-date{font-size:11px;color:var(--text3);font-family:"JetBrains Mono",monospace;margin-top:2px}
+.hist-amt{font-family:"JetBrains Mono",monospace;font-size:14px;font-weight:600;color:var(--red)}
+.hist-amt.cr{color:var(--green)}
+.empty{color:var(--text3);text-align:center;padding:28px;font-size:13px}
+
+/* ONLINE CARD */
+.online-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.online-count-badge{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--green);font-weight:600}
+.online-dot-ring{position:relative;width:14px;height:14px;flex-shrink:0}
+.online-dot-ring::before{content:"";position:absolute;inset:0;border-radius:50%;border:1.5px solid var(--green);opacity:.4;animation:ring 2s ease infinite}
+.online-dot-ring::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s ease infinite}
+@keyframes ring{0%{transform:scale(.8);opacity:.6}100%{transform:scale(1.6);opacity:0}}
+
+.user-list{display:flex;flex-direction:column;gap:.6rem;max-height:440px;overflow-y:auto}
+.user-list::-webkit-scrollbar{width:3px}
+.user-list::-webkit-scrollbar-thumb{background:var(--navy5);border-radius:4px}
+
+.user-item{display:flex;align-items:center;gap:.75rem;padding:.65rem .85rem;background:var(--navy3);border:1px solid var(--border);border-radius:10px;transition:all .2s}
+.user-item:hover{border-color:var(--border2);background:var(--navy4)}
+.user-item-av{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#0F1D3A,#1E4A8A);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--blue3);flex-shrink:0}
+.user-item-name{font-size:13px;font-weight:500;color:var(--text)}
+.user-item-time{font-size:11px;color:var(--text3);font-family:"JetBrains Mono",monospace}
+
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:1000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}
+.modal-overlay.open{opacity:1;visibility:visible}
+.modal{background:var(--navy2);border:1px solid var(--border2);border-radius:22px;padding:32px;max-width:480px;width:90%;box-shadow:0 0 80px rgba(30,111,217,.1);transform:translateY(20px);opacity:0;transition:transform .3s,opacity .3s}
+.modal-overlay.open .modal{transform:translateY(0);opacity:1}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+.modal-header h2{font-size:22px;font-weight:700;color:var(--text)}
+.modal-close{background:none;border:none;font-size:24px;color:var(--text3);cursor:pointer}
+.modal-body{display:flex;flex-direction:column;gap:16px}
+.modal-body p{font-size:14px;color:var(--text2);line-height:1.6}
+.modal-body strong{color:var(--text)}
+.modal-input-group{margin-bottom:16px}
+.modal-input-group label{display:block;font-size:13px;color:var(--text2);margin-bottom:8px}
+.modal-input-group input{width:100%;padding:12px 16px;background:var(--navy3);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:"Space Grotesk",sans-serif;font-size:15px;outline:none;transition:border-color .2s}
+.modal-input-group input:focus{border-color:var(--blue2)}
+.modal-input-group input::placeholder{color:var(--text3)}
+.modal-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:24px}
+.btn-modal{padding:12px 24px;border-radius:11px;font-family:"Space Grotesk",sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s}
+.btn-modal.cancel{background:var(--navy3);border:1px solid var(--border);color:var(--text2)}
+.btn-modal.cancel:hover{border-color:var(--border2);color:var(--text)}
+.btn-modal.primary{background:var(--blue2);border:none;color:#02060F}
+.btn-modal.primary:hover{background:var(--blue3);transform:translateY(-1px);box-shadow:0 6px 20px rgba(45,142,255,.3)}
+
+/* TOAST */
+#toast-container{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:1001;display:flex;flex-direction:column-reverse;gap:10px}
+.toast{background:var(--navy3);border:1px solid var(--border2);border-radius:10px;padding:14px 20px;box-shadow:0 4px 12px rgba(0,0,0,.2);color:var(--text);font-size:14px;opacity:0;transform:translateY(20px);transition:opacity .3s,transform .3s;min-width:280px;text-align:center}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.success{border-color:var(--green-border);color:var(--green)}
+.toast.error{border-color:var(--red-border);color:var(--red)}
+
+/* CUPOM */
+.coupon-input-group{display:flex;gap:10px;margin-top:1rem}
+.coupon-input{flex:1;padding:12px 16px;background:var(--navy3);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:"Space Grotesk",sans-serif;font-size:15px;outline:none;transition:border-color .2s}
+.coupon-input:focus{border-color:var(--blue2)}
+.coupon-input::placeholder{color:var(--text3)}
+.btn-apply-coupon{padding:12px 20px;background:var(--blue2);border:none;border-radius:9px;color:#02060F;font-family:"Space Grotesk",sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s;white-space:nowrap}
+.btn-apply-coupon:hover{background:var(--blue3);transform:translateY(-1px);box-shadow:0 6px 20px rgba(45,142,255,.3)}
+.coupon-info{font-size:13px;color:var(--green);margin-top:8px}
+.coupon-error{font-size:13px;color:var(--red);margin-top:8px}
+
+/* MEDIA QUERIES */
+@media (max-width: 768px) {
+  nav{padding:0 1rem}
+  .logo-name{display:none}
+  main{grid-template-columns:1fr;padding:1.5rem 1rem}
+  .top-row{grid-template-columns:1fr}
+  .saldo-num{font-size:38px}
+  .saldo-num .cur{font-size:16px}
+  .card{padding:1.2rem 1.2rem}
+  .chave-header{flex-direction:column;align-items:flex-start;gap:10px}
+  .key-time-row{flex-direction:column;align-items:flex-start;gap:5px}
+  .stats-row{grid-template-columns:1fr}
+  .plano{padding:1rem .8rem}
+  .plano-h{font-size:15px}
+  .plano-p{font-size:20px}
+  .buy-section{flex-direction:column;align-items:stretch}
+  .btn-buy{width:100%}
+  .coupon-input-group{flex-direction:column}
+  .btn-apply-coupon{width:100%}
+}
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spin-loader"></div>
+  <span class="load-text">Carregando...</span>
+</div>
+
+<div id="login-page">
+  <div class="login-card">
+    <h1>Bem-vindo ao <em>Bob Joiner</em></h1>
+    <p>Faça login com sua conta Discord para acessar o painel e gerenciar suas chaves.</p>
+    <div class="login-features">
+      <div class="login-feat"><span class="login-feat-dot"></span>Gerencie suas chaves</div>
+      <div class="login-feat"><span class="login-feat-dot"></span>Compre tempo de uso</div>
+      <div class="login-feat"><span class="login-feat-dot"></span>Veja seu histórico</div>
+    </div>
+    <button class="btn-discord" onclick="loginDiscord()">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 240">
+        <path d="M104.4 103.9c-5.7 0-10.2 5-10.2 11.1s4.6 11.1 10.2 11.1c5.7 0 10.2-5 10.2-11.1.1-6.1-4.5-11.1-10.2-11.1zM140.9 103.9c-5.7 0-10.2 5-10.2 11.1s4.6 11.1 10.2 11.1c5.7 0 10.2-5 10.2-11.1s-4.5-11.1-10.2-11.1z"/>
+        <path d="M189.5 20.2c-19.1-9-38.7-12.7-58.8-12.7-20.2 0-40.4 3.9-59.3 13.1-18.9 9.2-33.7 21.3-44.4 35.6-10.7 14.3-17.1 30.2-20.3 47.1-3.2 16.9-3.4 34.1-1.3 50.8 2.1 16.7 6.2 32.5 12.3 47.6 12.8 31.6 30.2 54.5 52.4 69.6 22.2 15.1 47.1 22.4 74.4 22.6 27.3.2 52.2-7 74.7-22.7 22.5-15.2 39.9-38.1 52.7-69.8 6.3-15.1 10.5-30.9 12.7-47.6 2.2-16.7 2-33.9-1.3-50.8-3.2-16.9-9.7-32.8-20.3-47.1-10.7-14.3-25.5-26.4-44.4-35.6zM157.6 167.9c-10.7 10.7-22.9 16-36.4 16-13.6 0-25.9-5.3-36.5-16-10.7-10.7-16.1-22.9-16.1-36.4 0-13.6 5.4-25.9 16.1-36.5 10.7-10.7 22.9-16.1 36.5-16.1 13.6 0 25.9 5.4 36.5 16.1 10.7 10.7 16.1 22.9 16.1 36.5 0 13.6-5.4 25.9-16.1 36.4z"/>
+      </svg>
+      Entrar com Discord
+    </button>
+  </div>
+</div>
+
+<nav id="main-nav" style="display: none;">
+  <div class="logo">
+    <img src="https://cdn.discordapp.com/avatars/123456789012345678/a_abcdefghijklmnopqrstuvwxyz0123456789.png" alt="Avatar" class="logo-img" id="nav-avatar">
+    <span class="logo-name">Bob <em>Joiner</em></span>
+  </div>
+  <div class="nav-r">
+    <div class="chip">
+      <div class="chip-av" id="chip-avatar-placeholder"></div>
+      <img src="" alt="Avatar" class="chip-av" id="chip-avatar" style="display: none;">
+      <span class="chip-name" id="chip-username"></span>
+    </div>
+    <button class="btn-sair" onclick="logout()">Sair</button>
+  </div>
+</nav>
+
+<main id="main-content" style="display: none;">
+  <div class="col-left">
+    <div class="top-row">
+      <div class="card" style="animation-delay: 0s;">
+        <div class="label">Seu Saldo</div>
+        <div class="saldo-num">R$<span id="user-balance">0.00</span><span class="cur">BRL</span></div>
+        <div class="saldo-sub">Recarregue para comprar mais tempo.</div>
+        <div class="saldo-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-wallet"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h12a2 2 0 0 1 0 4H5a2 2 0 0 0 0 4h12c.7 0 1.3.3 1.7.7l2.8 2.8"></path><path d="M2 20h.01"></path></svg>
+        </div>
+      </div>
+      <div class="card" style="animation-delay: 0.1s;">
+        <div class="label">Sua Chave</div>
+        <div class="chave-header">
+          <div class="chave-title">
+            <span id="key-name">N/A</span>
+            <span class="status off" id="key-status"><span class="status-dot"></span>Offline</span>
+          </div>
+        </div>
+        <div class="key-time-row">
+          <span class="key-time-badge" id="key-time-left"></span>
+          <span class="key-paused" id="key-paused-text" style="display: none;">PAUSADA</span>
+        </div>
+        <div class="key-script-box">
+          <button class="eye-btn" id="toggle-script-visibility">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          </button>
+          <span id="key-script-content" style="display: none;"></span>
+          <span class="key-no-msg" id="key-no-script-msg">Você não possui uma chave ativa.</span>
+          <div class="key-box-no" id="key-no-script-box" style="display: none;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-info"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+            <span>Sua chave aparecerá aqui após a compra.</span>
+          </div>
+        </div>
+        <button class="btn-copy-script" id="copy-script-btn" style="display: none;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+          Copiar Script
+        </button>
+      </div>
+    </div>
+
+    <div class="card" style="animation-delay: 0.2s;">
+      <div class="label">Slots</div>
+      <div class="slots-row">
+        <div class="slots-big">
+          <span class="slots-n" id="slots-used">0</span>
+          <span class="slots-sep">/</span>
+          <span class="slots-t" id="slots-max">0</span>
+        </div>
+        <div class="slots-desc">Usuários online agora.</div>
+        <div class="bar-wrap">
+          <div class="bar-label">
+            <span id="slots-available-text">0 disponíveis</span>
+            <span id="slots-percentage">0%</span>
+          </div>
+          <div class="bar-bg"><div class="bar-fill" id="slots-bar-fill"></div></div>
+        </div>
+        <button class="btn-icon" onclick="refreshOnlineUsers()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-rotate-cw spin-btn" id="refresh-online-icon"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+          Atualizar
+        </button>
+      </div>
+    </div>
+
+    <div class="card" style="animation-delay: 0.3s;">
+      <div class="label">Comprar Tempo</div>
+      <div class="planos-grid" id="planos-grid"></div>
+      <div class="coupon-input-group">
+        <input type="text" class="coupon-input" id="coupon-code-input" placeholder="Tem um cupom?">
+        <button class="btn-apply-coupon" id="apply-coupon-btn">Aplicar</button>
+      </div>
+      <div id="coupon-message"></div>
+      <div class="buy-section">
+        <div class="buy-info">
+          <div class="buy-info-line">Plano Selecionado: <strong id="selected-plan-label">Nenhum</strong></div>
+          <div class="buy-info-line">Valor Total: <strong id="final-price">R$0.00</strong></div>
+        </div>
+        <button class="btn-buy" id="buy-button" disabled>Comprar Agora</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-right">
+    <div class="card" style="animation-delay: 0.4s;">
+      <div class="label">Usuários Online</div>
+      <div class="online-header">
+        <div class="online-count-badge">
+          <span class="online-dot-ring"></span>
+          <span id="online-users-count">0</span> Online
+        </div>
+      </div>
+      <div class="user-list" id="online-users-list"></div>
+      <div class="empty" id="online-users-empty" style="display: none;">Ninguém online no momento.</div>
+    </div>
+
+    <div class="card" style="animation-delay: 0.5s;">
+      <div class="label">Histórico de Transações</div>
+      <div class="hist-list" id="transaction-history-list"></div>
+      <div class="empty" id="transaction-history-empty" style="display: none;">Nenhuma transação ainda.</div>
+    </div>
+  </div>
+</main>
+
+<!-- Modals -->
+<div class="modal-overlay" id="recharge-modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Recarregar Saldo</h2>
+      <button class="modal-close" onclick="closeRechargeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p>Para recarregar seu saldo, faça um Pix para a chave abaixo. Informe o código gerado na descrição do Pix para que possamos identificar seu pagamento.</p>
+      <div class="modal-input-group">
+        <label for="pix-key">Chave Pix</label>
+        <input type="text" id="pix-key" readonly>
+      </div>
+      <div class="modal-input-group">
+        <label for="pix-name">Nome do Recebedor</label>
+        <input type="text" id="pix-name" readonly>
+      </div>
+      <div class="modal-input-group">
+        <label for="pix-code">Código da Recarga (use na descrição do Pix)</label>
+        <input type="text" id="pix-code" readonly>
+      </div>
+      <p>Valor da Recarga: <strong id="recharge-amount">R$0.00</strong></p>
+      <p>Status: <strong id="recharge-status">Aguardando pagamento...</strong></p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal cancel" onclick="closeRechargeModal()">Fechar</button>
+      <button class="btn-modal primary" onclick="checkRechargeStatus()">Verificar Pagamento</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+  const API_URL = window.location.origin; // Usar a mesma origem para a API
+  const DISCORD_CLIENT_ID = ""; // Preencher com seu Client ID do Discord
+
+  let userToken = localStorage.getItem('bobjoiner_token');
+  let currentUser = null;
+  let selectedPlan = null;
+  let currentCoupon = null;
+  let rechargeInterval = null;
+
+  function showLoading() { document.getElementById('loading').style.display = 'flex'; }
+  function hideLoading() { document.getElementById('loading').style.display = 'none'; }
+  function showLoginPage() { document.getElementById('login-page').style.display = 'flex'; }
+  function hideLoginPage() { document.getElementById('login-page').style.display = 'none'; }
+  function showMainContent() { document.getElementById('main-nav').style.display = 'flex'; document.getElementById('main-content').style.display = 'grid'; }
+  function hideMainContent() { document.getElementById('main-nav').style.display = 'none'; document.getElementById('main-content').style.display = 'none'; }
+
+  function showToast(message, type = 'info') {
+    const toastContainer = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.classList.add('toast', type);
+    toast.textContent = message;
+    toastContainer.appendChild(toast);
+
+    setTimeout(() => {
+      toast.classList.add('show');
+    }, 100);
+
+    setTimeout(() => {
+      toast.classList.remove('show');
+      toast.addEventListener('transitionend', () => toast.remove());
+    }, 3000);
+  }
+
+  async function loginDiscord() {
+    const redirectUri = `${API_URL}/auth/callback`;
+    window.location.href = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=identify`;
+  }
+
+  async function logout() {
+    localStorage.removeItem('bobjoiner_token');
+    userToken = null;
+    currentUser = null;
+    showLoginPage();
+    hideMainContent();
+    showToast('Você foi desconectado.', 'info');
+  }
+
+  async function fetchUserData() {
+    if (!userToken) return null;
+    try {
+      const res = await fetch(`${API_URL}/auth/me`, {
+        headers: { 'Authorization': `Bearer ${userToken}` }
+      });
+      if (res.status === 403) { // Token inválido ou expirado
+        logout();
+        return null;
+      }
+      if (!res.ok) throw new Error('Erro ao buscar dados do usuário');
+      const data = await res.json();
+      currentUser = data;
+      updateUI();
+      return data;
+    } catch (error) {
+      console.error('Erro ao buscar dados do usuário:', error);
+      logout();
+      return null;
+    }
+  }
+
+  function updateUI() {
+    if (!currentUser) return;
+
+    hideLoading();
+    hideLoginPage();
+    showMainContent();
+
+    // Nav Bar
+    document.getElementById('nav-avatar').src = `https://cdn.discordapp.com/avatars/${currentUser.discordId}/${currentUser.avatar}.png`;
+    document.getElementById('chip-avatar').src = `https://cdn.discordapp.com/avatars/${currentUser.discordId}/${currentUser.avatar}.png`;
+    document.getElementById('chip-avatar').style.display = 'block';
+    document.getElementById('chip-avatar-placeholder').style.display = 'none';
+    document.getElementById('chip-username').textContent = currentUser.discordTag;
+
+    // Saldo
+    document.getElementById('user-balance').textContent = currentUser.balance.toFixed(2);
+
+    // Key Info
+    const keyNameElem = document.getElementById('key-name');
+    const keyStatusElem = document.getElementById('key-status');
+    const keyTimeLeftElem = document.getElementById('key-time-left');
+    const keyPausedTextElem = document.getElementById('key-paused-text');
+    const keyScriptContentElem = document.getElementById('key-script-content');
+    const keyNoScriptMsgElem = document.getElementById('key-no-script-msg');
+    const keyNoScriptBoxElem = document.getElementById('key-no-script-box');
+    const copyScriptBtn = document.getElementById('copy-script-btn');
+
+    if (currentUser.key && currentUser.key.hasTime) {
+      keyNameElem.textContent = currentUser.key.name;
+      keyStatusElem.classList.remove('off');
+      keyStatusElem.classList.add('on');
+      keyStatusElem.innerHTML = '<span class="status-dot"></span>Online';
+      keyTimeLeftElem.textContent = currentUser.key.timeLeft;
+      keyScriptContentElem.innerHTML = `
+        <span class="ks-purple">loadstring</span>(<span class="ks-white">game:HttpGet(\'${API_URL}/script?key=${currentUser.key.name}&secret=SEU_SCRIPT_SECRET\', true)</span>)()
+      `;
+      keyScriptContentElem.style.display = 'block';
+      keyNoScriptMsgElem.style.display = 'none';
+      keyNoScriptBoxElem.style.display = 'none';
+      copyScriptBtn.style.display = 'flex';
+
+      if (currentUser.key.paused) {
+        keyPausedTextElem.style.display = 'inline';
+        keyStatusElem.classList.remove('on');
+        keyStatusElem.classList.add('off');
+        keyStatusElem.innerHTML = '<span class="status-dot"></span>Pausada';
+      } else {
+        keyPausedTextElem.style.display = 'none';
+      }
+    } else {
+      keyNameElem.textContent = 'N/A';
+      keyStatusElem.classList.remove('on');
+      keyStatusElem.classList.add('off');
+      keyStatusElem.innerHTML = '<span class="status-dot"></span>Offline';
+      keyTimeLeftElem.textContent = 'Expirado';
+      keyPausedTextElem.style.display = 'none';
+      keyScriptContentElem.style.display = 'none';
+      keyNoScriptMsgElem.style.display = 'block';
+      keyNoScriptBoxElem.style.display = 'flex';
+      copyScriptBtn.style.display = 'none';
+    }
+
+    // Planos
+    const planosGrid = document.getElementById('planos-grid');
+    planosGrid.innerHTML = '';
+    currentUser.plans.forEach(plan => {
+      const planDiv = document.createElement('div');
+      planDiv.classList.add('plano');
+      if (!plan.active) planDiv.classList.add('disabled');
+      planDiv.dataset.value = plan.value;
+      planDiv.onclick = () => selectPlan(plan);
+      planDiv.innerHTML = `
+        ${plan.value === 'lifetime' ? '<div class="pop-tag">Popular</div>' : ''}
+        <span class="plano-icon">${plan.emoji}</span>
+        <h3 class="plano-h">${plan.label}</h3>
+        <p class="plano-p">R$${plan.price.toFixed(2)}</p>
+        <p class="plano-rate">${plan.hours}h / R$${(plan.price / plan.hours).toFixed(2)}h</p>
+      `;
+      planosGrid.appendChild(planDiv);
+    });
+
+    // Transações
+    const transactionHistoryList = document.getElementById('transaction-history-list');
+    transactionHistoryList.innerHTML = '';
+    if (currentUser.transactions && currentUser.transactions.length > 0) {
+      document.getElementById('transaction-history-empty').style.display = 'none';
+      currentUser.transactions.forEach(tx => {
+        const txDiv = document.createElement('div');
+        txDiv.classList.add('hist-item');
+        const isCredit = tx.type === 'deposit' || tx.amount > 0;
+        txDiv.innerHTML = `
+          <div class="hist-l">
+            <div class="hist-ic">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-wallet"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h12a2 2 0 0 1 0 4H5a2 2 0 0 0 0 4h12c.7 0 1.3.3 1.7.7l2.8 2.8"></path><path d="M2 20h.01"></path></svg>
+            </div>
+            <div>
+              <div class="hist-name">${tx.description}</div>
+              <div class="hist-date">${new Date(tx.createdAt).toLocaleString()}</div>
+            </div>
+          </div>
+          <div class="hist-amt ${isCredit ? 'cr' : ''}">${isCredit ? '+' : '-'}R$${Math.abs(tx.amount).toFixed(2)}</div>
+        `;
+        transactionHistoryList.appendChild(txDiv);
+      });
+    } else {
+      document.getElementById('transaction-history-empty').style.display = 'block';
+    }
+
+    // Online Users
+    updateOnlineUsersUI();
+  }
+
+  function selectPlan(plan) {
+    if (!plan.active) return;
+    selectedPlan = plan;
+    document.querySelectorAll('.plano').forEach(p => p.classList.remove('active'));
+    document.querySelector(`.plano[data-value="${plan.value}"]`).classList.add('active');
+    document.getElementById('selected-plan-label').textContent = plan.label;
+    updateFinalPrice();
+    document.getElementById('buy-button').disabled = false;
+  }
+
+  async function updateFinalPrice() {
+    let price = selectedPlan ? selectedPlan.price : 0;
+    if (currentCoupon) {
+      const res = await fetch(`${API_URL}/api/apply-coupon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${userToken}` },
+        body: JSON.stringify({ couponCode: currentCoupon.code, originalPrice: price })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        price = data.finalPrice;
+        document.getElementById('coupon-message').innerHTML = `<div class="coupon-info">Cupom aplicado! Desconto de ${data.discount}${data.type === 'percent' ? '%' : 'R$'}.</div>`;
+      } else {
+        document.getElementById('coupon-message').innerHTML = `<div class="coupon-error">${data.msg}</div>`;
+        currentCoupon = null; // Invalida o cupom se houver erro
+      }
+    } else {
+      document.getElementById('coupon-message').innerHTML = '';
+    }
+    document.getElementById('final-price').textContent = `R$${price.toFixed(2)}`;
+  }
+
+  document.getElementById('apply-coupon-btn').addEventListener('click', async () => {
+    const couponCode = document.getElementById('coupon-code-input').value.trim();
+    if (!couponCode) {
+      currentCoupon = null;
+      updateFinalPrice();
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/apply-coupon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${userToken}` },
+        body: JSON.stringify({ couponCode, originalPrice: selectedPlan ? selectedPlan.price : 0 })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        currentCoupon = { code: couponCode, discount: data.discount, type: data.type };
+        showToast('Cupom aplicado com sucesso!', 'success');
+      } else {
+        currentCoupon = null;
+        showToast(data.msg, 'error');
+      }
+      updateFinalPrice();
+    } catch (error) {
+      console.error('Erro ao aplicar cupom:', error);
+      showToast('Erro ao aplicar cupom.', 'error');
+      currentCoupon = null;
+      updateFinalPrice();
+    }
+  });
+
+  document.getElementById('buy-button').addEventListener('click', async () => {
+    if (!selectedPlan) return showToast('Selecione um plano primeiro.', 'error');
+    if (currentUser.balance < parseFloat(document.getElementById('final-price').textContent.replace('R$', ''))) {
+      return showToast('Saldo insuficiente. Recarregue seu saldo.', 'error');
+    }
+
+    showLoading();
+    try {
+      const res = await fetch(`${API_URL}/api/buy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${userToken}` },
+        body: JSON.stringify({ planValue: selectedPlan.value, couponCode: currentCoupon ? currentCoupon.code : null })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(`Compra de ${data.plan} realizada com sucesso!`, 'success');
+        currentCoupon = null; // Limpa o cupom após a compra
+        document.getElementById('coupon-code-input').value = '';
+        await fetchUserData(); // Atualiza os dados do usuário e UI
+      } else {
+        showToast(data.error, 'error');
+      }
+    } catch (error) {
+      console.error('Erro ao comprar plano:', error);
+      showToast('Erro ao processar a compra.', 'error');
+    }
+    hideLoading();
+  });
+
+  document.getElementById('toggle-script-visibility').addEventListener('click', () => {
+    const scriptContent = document.getElementById('key-script-content');
+    const eyeIcon = document.querySelector('#toggle-script-visibility svg');
+    if (scriptContent.style.display === 'none') {
+      scriptContent.style.display = 'block';
+      eyeIcon.innerHTML = '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle>'; // eye
+    } else {
+      scriptContent.style.display = 'none';
+      eyeIcon.innerHTML = '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"></path><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"></path><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.78 9.78 0 0 0 4.14-.9"></path><line x1="2" x2="22" y1="2" y2="22"></line>'; // eye-off
+    }
+  });
+
+  document.getElementById('copy-script-btn').addEventListener('click', () => {
+    const scriptContent = document.getElementById('key-script-content').textContent;
+    navigator.clipboard.writeText(scriptContent.trim()).then(() => {
+      showToast('Script copiado!', 'success');
+    }).catch(err => {
+      console.error('Erro ao copiar script:', err);
+      showToast('Erro ao copiar script.', 'error');
+    });
+  });
+
+  async function refreshOnlineUsers() {
+    const refreshIcon = document.getElementById('refresh-online-icon');
+    refreshIcon.classList.add('spin-btn');
+    try {
+      const res = await fetch(`${API_URL}/api/online`, {
+        headers: { 'Authorization': `Bearer ${userToken}` }
+      });
+      if (!res.ok) throw new Error('Erro ao buscar usuários online');
+      const data = await res.json();
+      currentUser.onlineUsers = data.online;
+      currentUser.maxSlots = data.maxSlots;
+      updateOnlineUsersUI();
+    } catch (error) {
+      console.error('Erro ao buscar usuários online:', error);
+      showToast('Erro ao carregar usuários online.', 'error');
+    } finally {
+      refreshIcon.classList.remove('spin-btn');
+    }
+  }
+
+  function updateOnlineUsersUI() {
+    const onlineUsersList = document.getElementById('online-users-list');
+    const onlineUsersCount = document.getElementById('online-users-count');
+    const onlineUsersEmpty = document.getElementById('online-users-empty');
+    const slotsUsedElem = document.getElementById('slots-used');
+    const slotsMaxElem = document.getElementById('slots-max');
+    const slotsAvailableTextElem = document.getElementById('slots-available-text');
+    const slotsPercentageElem = document.getElementById('slots-percentage');
+    const slotsBarFillElem = document.getElementById('slots-bar-fill');
+
+    onlineUsersList.innerHTML = '';
+    if (currentUser.onlineUsers && currentUser.onlineUsers.length > 0) {
+      onlineUsersEmpty.style.display = 'none';
+      currentUser.onlineUsers.forEach(user => {
+        const userDiv = document.createElement('div');
+        userDiv.classList.add('user-item');
+        userDiv.innerHTML = `
+          <div class="user-item-av">${user.robloxName.substring(0, 2).toUpperCase()}</div>
+          <div class="user-item-name">${user.robloxName}</div>
+          <div class="user-item-time">${user.isLifetime ? 'Lifetime' : formatTimeShort(user.expiryMs)}</div>
+        `;
+        onlineUsersList.appendChild(userDiv);
+      });
+    } else {
+      onlineUsersEmpty.style.display = 'block';
+    }
+
+    const currentOnline = currentUser.onlineUsers ? currentUser.onlineUsers.length : 0;
+    const maxSlots = currentUser.maxSlots || 0;
+    const slotsAvailable = Math.max(0, maxSlots - currentOnline);
+    const percentage = maxSlots > 0 ? (currentOnline / maxSlots) * 100 : 0;
+
+    onlineUsersCount.textContent = currentOnline;
+    slotsUsedElem.textContent = currentOnline;
+    slotsMaxElem.textContent = maxSlots;
+    slotsAvailableTextElem.textContent = `${slotsAvailable} disponíveis`;
+    slotsPercentageElem.textContent = `${percentage.toFixed(0)}%`;
+    slotsBarFillElem.style.width = `${percentage}%`;
+  }
+
+  // Recharge Modal Logic
+  function openRechargeModal(amount) {
+    document.getElementById('recharge-amount').textContent = `R$${amount.toFixed(2)}`;
+    document.getElementById('recharge-modal-overlay').classList.add('open');
+    createRecharge(amount);
+  }
+
+  function closeRechargeModal() {
+    document.getElementById('recharge-modal-overlay').classList.remove('open');
+    clearInterval(rechargeInterval);
+    rechargeInterval = null;
+    document.getElementById('recharge-status').textContent = 'Aguardando pagamento...';
+  }
+
+  async function createRecharge(amount) {
+    try {
+      const res = await fetch(`${API_URL}/api/recharge/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${userToken}` },
+        body: JSON.stringify({ amount })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        document.getElementById('pix-key').value = data.pixKey;
+        document.getElementById('pix-name').value = data.pixName;
+        document.getElementById('pix-code').value = data.code;
+        document.getElementById('recharge-status').textContent = 'Aguardando pagamento...';
+        rechargeInterval = setInterval(checkRechargeStatus, 10000); // Verificar a cada 10 segundos
+      } else {
+        showToast(data.error, 'error');
+        closeRechargeModal();
+      }
+    } catch (error) {
+      console.error('Erro ao criar recarga:', error);
+      showToast('Erro ao iniciar recarga.', 'error');
+      closeRechargeModal();
+    }
+  }
+
+  async function checkRechargeStatus() {
+    try {
+      const res = await fetch(`${API_URL}/api/recharge/status`, {
+        headers: { 'Authorization': `Bearer ${userToken}` }
+      });
+      const data = await res.json();
+      if (data.pending === false) {
+        showToast('Recarga confirmada com sucesso!', 'success');
+        document.getElementById('recharge-status').textContent = 'Pagamento Confirmado!';
+        clearInterval(rechargeInterval);
+        rechargeInterval = null;
+        await fetchUserData(); // Atualiza os dados do usuário e UI
+        setTimeout(closeRechargeModal, 2000);
+      } else {
+        document.getElementById('recharge-status').textContent = 'Aguardando pagamento...';
+      }
+    } catch (error) {
+      console.error('Erro ao verificar status da recarga:', error);
+      showToast('Erro ao verificar status da recarga.', 'error');
+    }
+  }
+
+  // Initial Load
+  document.addEventListener('DOMContentLoaded', async () => {
+    showLoading();
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const error = urlParams.get('error');
+
+    if (token) {
+      localStorage.setItem('bobjoiner_token', token);
+      userToken = token;
+      // Limpa a URL para não exibir o token
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    if (error) {
+      showToast(`Erro de autenticação: ${error}`, 'error');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    if (userToken) {
+      await fetchUserData();
+      setInterval(fetchUserData, 60000); // Atualiza dados a cada minuto
+      setInterval(refreshOnlineUsers, 30000); // Atualiza usuários online a cada 30 segundos
+    } else {
+      hideLoading();
+      showLoginPage();
+    }
+  });
+
+  // Formatação de tempo para o frontend (pode ser diferente do backend)
+  function formatTimeShort(ms) {
+    if (ms <= 0) return "expirado";
+    const m = Math.floor(ms / 60_000);
+    const s = Math.floor((ms % 60_000) / 1000);
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+</script>
+
+</body>
+</html>

@@ -69,6 +69,12 @@ const ADMIN_ROLE_IDS = ["1477885793144930496","1501356382677373101","14778857975
 const RECHARGE_CHANNEL = "1511517095412895905";
 const MIN_RECHARGE = 5;
 
+// --- INITIALIZE DISCORD CLIENTS FIRST ---
+const clientNotifier = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+const clientLogs     = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+const clientPanel    = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+const clientPayment  = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+
 const DEFAULT_PLANS = [
     { label: "1 Hora",   value: "1h",  price: 5,  hours: 1,  emoji: "🕐", active: true },
     { label: "2 Horas",  value: "2h",  price: 10, hours: 2,  emoji: "⏱️", active: true },
@@ -334,6 +340,20 @@ function requireClientHeader(req, res, next) {
     next();
 }
 
+function checkKey(keyName, secret, hwid) {
+    if (secret !== SCRIPT_SECRET && secret !== RAILWAY_SECRET) return { ok: false, error: "Secret invalida." };
+    const realName = findKey(keyName);
+    if (!realName) return { ok: false, error: "Key inexistente." };
+    const d = keys[realName];
+    if (d.paused) return { ok: false, error: "Key pausada." };
+    if (d.expiry !== Infinity && d.expiry - Date.now() <= 0) return { ok: false, error: "Key expirada." };
+    if (hwid) {
+        if (!d.hwid) { d.hwid = hwid; saveKey(realName); }
+        else if (d.hwid !== hwid) return { ok: false, error: "HWID incompativel." };
+    }
+    return { ok: true, keyName: realName, data: d };
+}
+
 // Rotas para o Hopper
 app.post("/api/hopper/brainrot", requireClientHeader, async (req, res) => {
     if (!safeCompare(req.headers["x-railway-secret"], RAILWAY_SECRET)) return res.status(403).send("Forbidden");
@@ -444,33 +464,6 @@ clientPanel.on(Events.ClientReady, async () => {
         }
     }
 });
-
-function requireClientHeader(req, res, next) {
-    if (req.headers["user-agent"] && BLOCKED_UA.some(ua => req.headers["user-agent"].toLowerCase().includes(ua)))
-        return res.status(403).send("Forbidden");
-    if (req.headers["x-bob-client"] !== CLIENT_HEADER)
-        return res.status(403).send("Forbidden");
-    next();
-}
-
-function checkKey(keyName, secret, hwid) {
-    if (secret !== SCRIPT_SECRET && secret !== RAILWAY_SECRET) return { ok: false, error: "Secret invalida." };
-    const realName = findKey(keyName);
-    if (!realName) return { ok: false, error: "Key inexistente." };
-    const d = keys[realName];
-    if (d.paused) return { ok: false, error: "Key pausada." };
-    if (d.expiry !== Infinity && d.expiry - Date.now() <= 0) return { ok: false, error: "Key expirada." };
-    if (hwid) {
-        if (!d.hwid) { d.hwid = hwid; saveKey(realName); }
-        else if (d.hwid !== hwid) return { ok: false, error: "HWID incompativel." };
-    }
-    return { ok: true, keyName: realName, data: d };
-}
-
-const clientNotifier = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
-const clientLogs     = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
-const clientPanel    = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
-const clientPayment  = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
 // --- AUTH ROUTES ---
 app.get("/auth/callback", async (req, res) => {
@@ -791,67 +784,6 @@ app.get("/api/transactions", authenticateToken, async (req, res) => {
     res.json({ ok: true, transactions });
 });
 
-// --- HOPPER API ROUTES ---
-app.post("/api", requireClientHeader, async (req, res) => {
-    const { key, secret, hwid, brainrot, jobId, placeId, players } = req.body;
-    const check = checkKey(key, secret, hwid);
-    if (!check.ok) return res.status(403).json({ error: check.error });
-
-    if (brainrot) {
-        pushBrainrot({ ...brainrot, jobId, placeId, players, key: check.keyName, hwid });
-        console.log(`[RAILWAY] Enviando brainrot: ${brainrot.name} | Owner: ${brainrot.owner} | ${brainrot.genText}`);
-        // Opcional: Enviar para o canal de logs do Discord
-        if (clientLogs && LOGS_CHANNEL_ID) {
-            const embed = new EmbedBuilder()
-                .setColor(COLORS.gold)
-                .setTitle(`🧠 Brainrot Encontrado!`) 
-                .setDescription(`**Key:** 
-${check.keyName}
-**HWID:** 
-${hwid}
-**Brainrot:** 
-${brainrot.name}
-**Owner:** 
-${brainrot.owner}
-**Geração:** 
-${brainrot.genText}
-**Job ID:** 
-${jobId}
-**Place ID:** 
-${placeId}
-**Players:** 
-${players}`)
-                .setTimestamp();
-            clientLogs.channels.cache.get(LOGS_CHANNEL_ID)?.send({ embeds: [embed] }).catch(console.error);
-        }
-    }
-    res.json({ ok: true });
-});
-
-app.post("/api/validate", requireClientHeader, async (req, res) => {
-    const { key, secret, hwid } = req.body;
-    const check = checkKey(key, secret, hwid);
-    if (!check.ok) return res.status(403).json({ error: check.error });
-    res.json({ ok: true, key: check.keyName, data: check.data });
-});
-
-app.post("/api/kicked", requireClientHeader, async (req, res) => {
-    const { key, secret, hwid, jobId } = req.body;
-    const check = checkKey(key, secret, hwid);
-    if (!check.ok) return res.status(403).json({ error: check.error });
-    kicked[check.keyName] = jobId;
-    res.json({ ok: true });
-});
-
-app.get("/api/latest", requireClientHeader, async (req, res) => {
-    const { key, secret, hwid } = req.query;
-    const check = checkKey(key, secret, hwid);
-    if (!check.ok) return res.status(403).json({ error: check.error });
-    res.json({ ok: true, brainrots: brainrots });
-});
-
-
-
 // Rotas para o Hopper (Roblox Script)
 app.post("/api/brainrot", requireClientHeader, async (req, res) => {
     const { key, secret, hwid } = req.query;
@@ -872,11 +804,6 @@ app.post("/api/log", requireClientHeader, async (req, res) => {
     if (!check.ok) return res.status(403).json({ error: check.error });
 
     console.log(`[ROBLOX LOG - ${level.toUpperCase()}] Key: ${check.keyName} | ${message}`);
-    // Opcional: Enviar para o canal de logs do Discord
-    // if (clientLogs && LOGS_CHANNEL_ID) {
-    //     const channel = clientLogs.channels.cache.get(LOGS_CHANNEL_ID);
-    //     if (channel) channel.send(`[${level.toUpperCase()}] Key: **${check.keyName}**\n${message}`);
-    // }
     res.json({ ok: true });
 });
 

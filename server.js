@@ -442,7 +442,6 @@ clientPanel.on(Events.ClientReady, async () => {
                         .setStyle(ButtonStyle.Secondary),
                 );
 
-            // Tenta encontrar a mensagem existente para editar, se não encontrar, envia uma nova
             try {
                 const messages = await channel.messages.fetch({ limit: 100 });
                 const existingMessage = messages.find(msg => 
@@ -463,6 +462,92 @@ clientPanel.on(Events.ClientReady, async () => {
             }
         }
     }
+});
+
+// Funções auxiliares para modais e interações
+const mkInput = (id, label, placeholder = "", required = true) => new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(TextInputStyle.Short).setRequired(required).setPlaceholder(placeholder));
+
+function buildModal_create() { return new ModalBuilder().setCustomId("modal_create").setTitle("🔑 Criar Key").addComponents(mkInput("key_name","Nome"),mkInput("key_h","Horas","24"),mkInput("key_m","Minutos","0",false),mkInput("key_pass","Senha")); }
+function buildModal_delete() { return new ModalBuilder().setCustomId("modal_delete").setTitle("🗑️ Deletar Key").addComponents(mkInput("key_name","Nome"),mkInput("key_pass","Senha")); }
+function buildModal_edit() { return new ModalBuilder().setCustomId("modal_edit").setTitle("📝 Editar Key").addComponents(mkInput("key_name","Nome"),mkInput("key_h","Adicionar Horas","0"),mkInput("key_pass","Senha")); }
+
+clientPanel.on(Events.InteractionCreate, async (interaction) => {
+    if (interaction.isModalSubmit()) {
+        await interaction.deferReply({ ephemeral: true });
+        const id = interaction.customId;
+        const getField = (name) => { try { return interaction.fields.getTextInputValue(name); } catch { return ""; } };
+        const pass = getField("key_pass");
+        
+        if (wrongPass(pass)) {
+            return interaction.editReply({ content: "❌ Senha administrativa incorreta!" });
+        }
+
+        if (id === "modal_create") {
+            const name = getField("key_name").trim();
+            const h = parseInt(getField("key_h")) || 0;
+            const m = parseInt(getField("key_m")) || 0;
+            const ms = (h * 3600 + m * 60) * 1000;
+            
+            if (keys[name]) return interaction.editReply({ content: `❌ Key \`${name}\` já existe!` });
+            
+            keys[name] = { expiry: Date.now() + ms, paused: false, remaining: 0, hwid: null, discordId: null, warnSent: false, isAutoKey: false };
+            await saveKey(name);
+            return interaction.editReply({ content: `✅ Key \`${name}\` criada com sucesso por ${formatTime(ms)}!` });
+        }
+
+        if (id === "modal_delete") {
+            const name = getField("key_name").trim();
+            const realName = findKey(name);
+            if (!realName) return interaction.editReply({ content: "❌ Key não encontrada!" });
+            
+            delete keys[realName];
+            await deleteKey(realName);
+            return interaction.editReply({ content: `✅ Key \`${realName}\` deletada!` });
+        }
+
+        if (id === "modal_edit") {
+            const name = getField("key_name").trim();
+            const addH = parseInt(getField("key_h")) || 0;
+            const realName = findKey(name);
+            if (!realName) return interaction.editReply({ content: "❌ Key não encontrada!" });
+            
+            const d = keys[realName];
+            if (d.expiry === Infinity) return interaction.editReply({ content: "❌ Key é Lifetime e não pode ser editada dessa forma." });
+            
+            const currentRemaining = (d.expiry > Date.now()) ? (d.expiry - Date.now()) : 0;
+            d.expiry = Date.now() + currentRemaining + (addH * 3600 * 1000);
+            await saveKey(realName);
+            return interaction.editReply({ content: `✅ Key \`${realName}\` atualizada! Novo tempo: ${formatTime(d.expiry - Date.now())}` });
+        }
+        return;
+    }
+
+    if (!interaction.isButton()) return;
+
+    if (interaction.customId === "panel_list_keys") {
+        await interaction.deferReply({ ephemeral: true });
+        const ks = Object.keys(keys);
+        if (!ks.length) return interaction.editReply({ content: "Nenhuma key cadastrada." });
+        
+        const now = Date.now();
+        const list = ks.map(k => {
+            const d = keys[k];
+            const time = d.expiry === Infinity ? "Lifetime ♾️" : formatTime(d.expiry - now);
+            return `• \`${k}\`: ${time} ${d.paused ? "⏸️" : "✅"}`;
+        }).join("\n");
+        
+        const embed = new EmbedBuilder()
+            .setTitle("📋 Lista de Keys")
+            .setColor(COLORS.primary)
+            .setDescription(list.substring(0, 4000))
+            .setTimestamp();
+            
+        return interaction.editReply({ embeds: [embed] });
+    }
+
+    if (interaction.customId === "panel_create_key") return interaction.showModal(buildModal_create());
+    if (interaction.customId === "panel_delete_key") return interaction.showModal(buildModal_delete());
+    if (interaction.customId === "panel_edit_key") return interaction.showModal(buildModal_edit());
 });
 
 // --- AUTH ROUTES ---

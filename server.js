@@ -556,13 +556,13 @@ setInterval(async () => {
     }
 }, 60_000);
 
-// --- EXPRESS APP ---
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+// Middleware para autenticação de administrador
+async function isAdmin(member) {
+    if (!member) return false;
+    if (member.permissions.has("Administrator")) return true;
+    const roles = member.roles.cache.map(r => r.id);
+    return ADMIN_ROLE_IDS.some(id => roles.includes(id));
+}
 
 // Middleware para verificar o cabeçalho do cliente
 function requireClientHeader(req, res, next) {
@@ -592,19 +592,38 @@ function requireAuth(req, res, next) {
     });
 }
 
-// Middleware para autenticação de administrador
-async function isAdmin(member) {
-    if (!member) return false;
-    if (member.permissions.has("Administrator")) return true;
-    const roles = member.roles.cache.map(r => r.id);
-    return ADMIN_ROLE_IDS.some(id => roles.includes(id));
+// Middleware para autenticação de administrador para rotas
+async function requireAdminAuth(req, res, next) {
+    // Para rotas de API, o req.user vem do JWT, que contém o discordId e roles
+    // Para interações do Discord, o isAdmin é chamado diretamente com o member
+    if (!req.user || !ADMIN_ROLE_IDS.some(id => req.user.roles?.includes(id))) {
+        // Se não houver req.user (ex: API key), ou se o usuário não tiver a role de admin
+        // Precisamos de uma forma de verificar se a requisição é de um admin para API
+        // Por enquanto, vamos assumir que o req.user.roles é preenchido pelo JWT se for um admin logado via Discord OAuth
+        // Ou, para chamadas de API internas/scripts, podemos usar um secret adicional
+        const secret = req.headers["x-admin-secret"];
+        if (secret && safeCompare(secret, ADMIN_PASS)) {
+            next(); // Permite acesso se o secret de admin estiver correto
+        } else {
+            return res.status(403).json({ error: "Acesso negado. Requer privilégios de administrador ou secret válido." });
+        }
+    }
+    next();
 }
 
-// --- ROTAS DA API ---
+// --- EXPRESS APP ---
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
 app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+// --- ROTAS DA API ---
 app.post("/api/auth", requireClientHeader, async (req, res) => {
     const { key, hwid } = req.body;
     const keyName = findKey(key);
@@ -1238,4 +1257,3 @@ io.on("connection", (socket) => {
         console.log("Cliente desconectado do Socket.io");
     });
 });
-

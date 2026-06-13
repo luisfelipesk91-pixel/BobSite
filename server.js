@@ -40,12 +40,14 @@ function requireEnv(name) {
 }
 
 const ADMIN_PASS    = requireEnv("ADMIN_PASS");
-const SCRIPT_SECRET = requireEnv("SCRIPT_SECRET");
+const SCRIPT_SECRET = requireEnv("SCRIPT_SECRET"); // Secret para o Joiner
+const RAILWAY_SECRET = requireEnv("RAILWAY_SECRET"); // Secret para o Hopper
+const RAILWAY_CLIENT = process.env.RAILWAY_CLIENT || "Bobnotify"; // Client para o Hopper
 const XOR_KEY       = requireEnv("XOR_KEY");
 const MONGODB_URI   = requireEnv("MONGODB_URI");
 const JWT_SECRET    = process.env.JWT_SECRET || "bobjoiner_jwt_secret_2026";
 
-const CLIENT_HEADER          = process.env.CLIENT_HEADER           || "BobJoiner-v2";
+const CLIENT_HEADER          = RAILWAY_CLIENT || "BobJoiner-v2"; // Usar o mesmo client header para Joiner e Hopper
 const PIX_KEY                = process.env.PIX_KEY                 || "";
 const PIX_NAME               = process.env.PIX_NAME                || "";
 const BUY_CHANNEL            = process.env.BUY_CHANNEL             || "";
@@ -318,7 +320,7 @@ async function createAutoKeyForUser(discordId, discordTag) {
 
 const app    = express();
 const server = http.createServer(app);
-const io     = new Server(server, { cors: { origin: "*" } });
+const io     = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
@@ -326,7 +328,184 @@ app.use(express.static(path.join(__dirname)));
 function requireClientHeader(req, res, next) {
     if (req.headers["user-agent"] && BLOCKED_UA.some(ua => req.headers["user-agent"].toLowerCase().includes(ua)))
         return res.status(403).send("Forbidden");
-    if (req.headers["x-client-header"] !== CLIENT_HEADER)
+    const clientHeader = req.headers["x-bob-client"] || req.headers["x-client-header"];
+    if (clientHeader !== CLIENT_HEADER && clientHeader !== "BobJoiner-v2")
+        return res.status(403).send("Forbidden");
+    next();
+}
+
+// Rotas para o Hopper
+app.post("/api/hopper/brainrot", requireClientHeader, async (req, res) => {
+    if (!safeCompare(req.headers["x-railway-secret"], RAILWAY_SECRET)) return res.status(403).send("Forbidden");
+    const { payload } = req.body;
+    if (!payload) return res.status(400).send("Payload ausente");
+    pushBrainrot(payload);
+    res.status(200).send("OK");
+});
+
+app.post("/api/hopper/logs", requireClientHeader, async (req, res) => {
+    if (!safeCompare(req.headers["x-railway-secret"], RAILWAY_SECRET)) return res.status(403).send("Forbidden");
+    const { message } = req.body;
+    if (!message) return res.status(400).send("Mensagem ausente");
+    if (clientLogs && LOGS_CHANNEL_ID) {
+        const channel = await clientLogs.channels.fetch(LOGS_CHANNEL_ID);
+        if (channel) channel.send(`[HOPPER LOG] ${message}`);
+    }
+    res.status(200).send("OK");
+});
+
+app.post("/api/notify", requireClientHeader, async (req, res) => {
+    if (!safeCompare(req.headers["x-railway-secret"], RAILWAY_SECRET)) return res.status(403).send("Forbidden");
+    const { type, message, embed } = req.body;
+    if (!type || !message) return res.status(400).send("Tipo e mensagem ausentes");
+
+    let targetClient = clientNotifier;
+    let targetChannelId = DISCORD_CHANNEL_ID;
+
+    if (type === "log") {
+        targetClient = clientLogs;
+        targetChannelId = LOGS_CHANNEL_ID;
+    } else if (type === "panel") {
+        targetClient = clientPanel;
+        targetChannelId = PANEL_CHANNEL_ID;
+    }
+
+    if (targetClient && targetChannelId) {
+        try {
+            const channel = await targetClient.channels.fetch(targetChannelId);
+            if (channel) {
+                if (embed) {
+                    const discordEmbed = new EmbedBuilder(embed);
+                    await channel.send({ embeds: [discordEmbed] });
+                } else {
+                    await channel.send(message);
+                }
+            }
+        } catch (error) {
+            console.error(`[API/NOTIFY] Erro ao enviar notificação para ${type}: ${error.message}`);
+        }
+    }
+    res.status(200).send("OK");
+});
+    if (!payload) return res.status(400).send("Payload ausente");
+    pushBrainrot(payload);
+    res.status(200).send("OK");
+});
+
+app.post("/api/hopper/logs", requireClientHeader, async (req, res) => {
+    if (!safeCompare(req.headers["x-railway-secret"], RAILWAY_SECRET)) return res.status(403).send("Forbidden");
+    const { message } = req.body;
+    if (!message) return res.status(400).send("Mensagem ausente");
+    if (clientLogs && LOGS_CHANNEL_ID) {
+        const channel = await clientLogs.channels.fetch(LOGS_CHANNEL_ID);
+        if (channel) channel.send(`[HOPPER LOG] ${message}`);
+    }
+    res.status(200).send("OK");
+});
+
+app.post("/api/notify", requireClientHeader, async (req, res) => {
+    if (!safeCompare(req.headers["x-railway-secret"], RAILWAY_SECRET)) return res.status(403).send("Forbidden");
+    const { type, message, embed } = req.body;
+    if (!type || !message) return res.status(400).send("Tipo e mensagem ausentes");
+
+    let targetClient = clientNotifier;
+    let targetChannelId = DISCORD_CHANNEL_ID;
+
+    if (type === "log") {
+        targetClient = clientLogs;
+        targetChannelId = LOGS_CHANNEL_ID;
+    } else if (type === "panel") {
+        targetClient = clientPanel;
+        targetChannelId = PANEL_CHANNEL_ID;
+    }
+
+    if (targetClient && targetChannelId) {
+        try {
+            const channel = await targetClient.channels.fetch(targetChannelId);
+            if (channel) {
+                if (embed) {
+                    const discordEmbed = new EmbedBuilder(embed);
+                    await channel.send({ embeds: [discordEmbed] });
+                } else {
+                    await channel.send(message);
+                }
+            }
+        } catch (error) {
+            console.error(`[API/NOTIFY] Erro ao enviar notificação para ${type}: ${error.message}`);
+        }
+    }
+    res.status(200).send("OK");
+});
+    if (!safeCompare(req.headers["x-railway-secret"], RAILWAY_SECRET)) return res.status(403).send("Forbidden");
+    const { message } = req.body;
+    if (!message) return res.status(400).send("Mensagem ausente");
+    if (clientLogs && LOGS_CHANNEL_ID) {
+        const channel = await clientLogs.channels.fetch(LOGS_CHANNEL_ID);
+        if (channel) channel.send(`[HOPPER LOG] ${message}`);
+    }
+    res.status(200).send("OK");
+});
+
+// Lógica para enviar o painel de chaves do BOB LOGS para o CHANNEL ID após o deploy
+clientPanel.on(Events.ClientReady, async () => {
+    console.log(`[PANEL] Logado como ${clientPanel.user.tag}`);
+    if (PANEL_CHANNEL_ID) {
+        const channel = await clientPanel.channels.fetch(PANEL_CHANNEL_ID);
+        if (channel && channel.type === ChannelType.GuildText) {
+            const embed = new EmbedBuilder()
+                .setColor(COLORS.dark)
+                .setTitle("🔑 Painel de Gerenciamento de Keys")
+                .setDescription("Use os botões abaixo para gerenciar as keys do Bob Joiner.")
+                .setTimestamp()
+                .setFooter({ text: "Bob Joiner Panel" });
+
+            const row = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId("panel_list_keys")
+                        .setLabel("Listar Keys")
+                        .setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder()
+                        .setCustomId("panel_create_key")
+                        .setLabel("Criar Key")
+                        .setStyle(ButtonStyle.Success),
+                    new ButtonBuilder()
+                        .setCustomId("panel_delete_key")
+                        .setLabel("Deletar Key")
+                        .setStyle(ButtonStyle.Danger),
+                    new ButtonBuilder()
+                        .setCustomId("panel_edit_key")
+                        .setLabel("Editar Key")
+                        .setStyle(ButtonStyle.Secondary),
+                );
+
+            // Tenta encontrar a mensagem existente para editar, se não encontrar, envia uma nova
+            try {
+                const messages = await channel.messages.fetch({ limit: 100 });
+                const existingMessage = messages.find(msg => 
+                    msg.author.id === clientPanel.user.id && 
+                    msg.embeds.length > 0 && 
+                    msg.embeds[0].title === "🔑 Painel de Gerenciamento de Keys"
+                );
+
+                if (existingMessage) {
+                    await existingMessage.edit({ embeds: [embed], components: [row] });
+                    console.log(`[PANEL] Painel de keys atualizado no canal ${channel.name}`);
+                } else {
+                    await channel.send({ embeds: [embed], components: [row] });
+                    console.log(`[PANEL] Painel de keys enviado para o canal ${channel.name}`);
+                }
+            } catch (error) {
+                console.error(`[PANEL] Erro ao enviar/atualizar painel de keys: ${error.message}`);
+            }
+        }
+    }
+});
+
+function requireClientHeader(req, res, next) {
+    if (req.headers["user-agent"] && BLOCKED_UA.some(ua => req.headers["user-agent"].toLowerCase().includes(ua)))
+        return res.status(403).send("Forbidden");
+    if (req.headers["x-bob-client"] !== CLIENT_HEADER)
         return res.status(403).send("Forbidden");
     next();
 }
@@ -469,6 +648,407 @@ app.post("/api/buy", authenticateToken, async (req, res) => {
 });
 
 app.get("/health", (_, res) => res.json({ status: "ok", time: Date.now() }));
+
+// --- HOPPER API ROUTES ---
+app.post("/api", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid, brainrot, jobId, placeId, players } = req.body;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+
+    if (brainrot) {
+        pushBrainrot({ ...brainrot, jobId, placeId, players, key: check.keyName, hwid });
+        console.log(`[RAILWAY] Enviando brainrot: ${brainrot.name} | Owner: ${brainrot.owner} | ${brainrot.genText}`);
+        // Opcional: Enviar para o canal de logs do Discord
+        if (clientLogs && LOGS_CHANNEL_ID) {
+            const embed = new EmbedBuilder()
+                .setColor(COLORS.gold)
+                .setTitle(`🧠 Brainrot Encontrado!`) 
+                .setDescription(`**Key:** 
+${check.keyName}
+**HWID:** 
+${hwid}
+**Brainrot:** 
+${brainrot.name}
+**Owner:** 
+${brainrot.owner}
+**Geração:** 
+${brainrot.genText}
+**Job ID:** 
+${jobId}
+**Place ID:** 
+${placeId}
+**Players:** 
+${players}`)
+                .setTimestamp();
+            clientLogs.channels.cache.get(LOGS_CHANNEL_ID)?.send({ embeds: [embed] }).catch(console.error);
+        }
+    }
+    res.json({ ok: true });
+});
+
+app.post("/api/validate", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.body;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+    res.json({ ok: true, key: check.keyName, data: check.data });
+});
+
+app.post("/api/kicked", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid, jobId } = req.body;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+    kicked[check.keyName] = jobId;
+    res.json({ ok: true });
+});
+
+app.get("/api/latest", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.query;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+    res.json({ ok: true, brainrots: brainrots });
+});
+
+app.post("/api/clear", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.body;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+    // Lógica para limpar logs ou outras ações relacionadas à key
+    res.json({ ok: true });
+});
+
+// --- JOINER API ROUTES (Existing) ---
+app.get("/api/plans", authenticateToken, async (req, res) => {
+    res.json({ ok: true, plans: PLANS });
+});
+
+app.get("/api/coupons", authenticateToken, async (req, res) => {
+    const coupons = await Coupon.find({});
+    res.json({ ok: true, coupons });
+});
+
+app.post("/api/coupons/create", authenticateToken, async (req, res) => {
+    const { code, discount, type, maxUses, expiresAt } = req.body;
+    if (!code || !discount) return res.status(400).json({ error: "Código e desconto são obrigatórios." });
+    const newCoupon = new Coupon({ code: code.toUpperCase(), discount, type, maxUses, expiresAt });
+    await newCoupon.save();
+    res.json({ ok: true, coupon: newCoupon });
+});
+
+app.post("/api/coupons/delete", authenticateToken, async (req, res) => {
+    const { code } = req.body;
+    await Coupon.deleteOne({ code: code.toUpperCase() });
+    res.json({ ok: true });
+});
+
+app.post("/api/plans/create", authenticateToken, async (req, res) => {
+    const { label, value, price, hours, emoji, active } = req.body;
+    if (!label || !value || !price || !hours) return res.status(400).json({ error: "Dados do plano incompletos." });
+    const newPlan = new PlanModel({ label, value, price, hours, emoji, active });
+    await newPlan.save();
+    PLANS.push(newPlan);
+    res.json({ ok: true, plan: newPlan });
+});
+
+app.post("/api/plans/update", authenticateToken, async (req, res) => {
+    const { value, ...updates } = req.body;
+    await PlanModel.findOneAndUpdate({ value }, updates);
+    loadPlansFromDB(); // Recarrega os planos para atualizar a lista em memória
+    res.json({ ok: true });
+});
+
+app.post("/api/plans/delete", authenticateToken, async (req, res) => {
+    const { value } = req.body;
+    await PlanModel.deleteOne({ value });
+    loadPlansFromDB();
+    res.json({ ok: true });
+});
+
+app.get("/api/users", authenticateToken, async (req, res) => {
+    const users = await User.find({});
+    res.json({ ok: true, users });
+});
+
+app.post("/api/users/update", authenticateToken, async (req, res) => {
+    const { discordId, balance, ...updates } = req.body;
+    await User.findOneAndUpdate({ discordId }, { balance, ...updates });
+    res.json({ ok: true });
+});
+
+app.post("/api/users/delete", authenticateToken, async (req, res) => {
+    const { discordId } = req.body;
+    await User.deleteOne({ discordId });
+    res.json({ ok: true });
+});
+
+app.get("/api/keys", authenticateToken, async (req, res) => {
+    const allKeys = await KeyModel.find({});
+    res.json({ ok: true, keys: allKeys });
+});
+
+app.post("/api/keys/create", authenticateToken, async (req, res) => {
+    const { name, expiry, paused, remaining, hwid, discordId, isAutoKey } = req.body;
+    const newKey = new KeyModel({ name, expiry, paused, remaining, hwid, discordId, isAutoKey });
+    await newKey.save();
+    loadKeys();
+    res.json({ ok: true, key: newKey });
+});
+
+app.post("/api/keys/update", authenticateToken, async (req, res) => {
+    const { name, ...updates } = req.body;
+    await KeyModel.findOneAndUpdate({ name }, updates);
+    loadKeys();
+    res.json({ ok: true });
+});
+
+app.post("/api/keys/delete", authenticateToken, async (req, res) => {
+    const { name } = req.body;
+    await KeyModel.deleteOne({ name });
+    loadKeys();
+    res.json({ ok: true });
+});
+
+app.get("/api/recharges", authenticateToken, async (req, res) => {
+    const recharges = await Recharge.find({});
+    res.json({ ok: true, recharges });
+});
+
+app.post("/api/recharges/confirm", authenticateToken, async (req, res) => {
+    const { code, adminId, adminTag } = req.body;
+    const recharge = await Recharge.findOne({ code });
+    if (!recharge) return res.status(404).json({ error: "Recarga não encontrada." });
+    if (recharge.status !== "pending") return res.status(400).json({ error: "Recarga já processada." });
+
+    recharge.status = "confirmed";
+    recharge.confirmedBy = adminTag;
+    await recharge.save();
+
+    const user = await User.findOne({ discordId: recharge.discordId });
+    if (user) {
+        user.balance += recharge.amount;
+        await user.save();
+        await new Transaction({ discordId: user.discordId, type: "recharge", amount: recharge.amount, description: `Recarga confirmada por ${adminTag}` }).save();
+    }
+
+    res.json({ ok: true, recharge });
+});
+
+app.post("/api/recharges/cancel", authenticateToken, async (req, res) => {
+    const { code, adminTag } = req.body;
+    const recharge = await Recharge.findOne({ code });
+    if (!recharge) return res.status(404).json({ error: "Recarga não encontrada." });
+    if (recharge.status !== "pending") return res.status(400).json({ error: "Recarga já processada." });
+
+    recharge.status = "cancelled";
+    recharge.confirmedBy = adminTag;
+    await recharge.save();
+    res.json({ ok: true, recharge });
+});
+
+app.get("/api/sales", authenticateToken, async (req, res) => {
+    const sales = await SaleHistory.find({});
+    res.json({ ok: true, sales });
+});
+
+app.get("/api/transactions", authenticateToken, async (req, res) => {
+    const transactions = await Transaction.find({});
+    res.json({ ok: true, transactions });
+});
+
+// --- HOPPER API ROUTES ---
+app.post("/api", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid, brainrot, jobId, placeId, players } = req.body;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+
+    if (brainrot) {
+        pushBrainrot({ ...brainrot, jobId, placeId, players, key: check.keyName, hwid });
+        console.log(`[RAILWAY] Enviando brainrot: ${brainrot.name} | Owner: ${brainrot.owner} | ${brainrot.genText}`);
+        // Opcional: Enviar para o canal de logs do Discord
+        if (clientLogs && LOGS_CHANNEL_ID) {
+            const embed = new EmbedBuilder()
+                .setColor(COLORS.gold)
+                .setTitle(`🧠 Brainrot Encontrado!`) 
+                .setDescription(`**Key:** 
+${check.keyName}
+**HWID:** 
+${hwid}
+**Brainrot:** 
+${brainrot.name}
+**Owner:** 
+${brainrot.owner}
+**Geração:** 
+${brainrot.genText}
+**Job ID:** 
+${jobId}
+**Place ID:** 
+${placeId}
+**Players:** 
+${players}`)
+                .setTimestamp();
+            clientLogs.channels.cache.get(LOGS_CHANNEL_ID)?.send({ embeds: [embed] }).catch(console.error);
+        }
+    }
+    res.json({ ok: true });
+});
+
+app.post("/api/validate", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.body;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+    res.json({ ok: true, key: check.keyName, data: check.data });
+});
+
+app.post("/api/kicked", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid, jobId } = req.body;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+    kicked[check.keyName] = jobId;
+    res.json({ ok: true });
+});
+
+app.get("/api/latest", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.query;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+    res.json({ ok: true, brainrots: brainrots });
+});
+
+app.post("/api/clear", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.body;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+    // Lógica para limpar logs ou outras ações relacionadas à key
+    res.json({ ok: true });
+});
+
+// Rotas para o Hopper (Roblox Script)
+app.post("/api/brainrot", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.query;
+    const { name, genStr, numVal, owner } = req.body;
+
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+
+    pushBrainrot({ name, genStr, numVal, owner, key: check.keyName });
+    res.json({ ok: true });
+});
+
+app.post("/api/log", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.query;
+    const { message, level = "info" } = req.body;
+
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+
+    console.log(`[ROBLOX LOG - ${level.toUpperCase()}] Key: ${check.keyName} | ${message}`);
+    // Opcional: Enviar para o canal de logs do Discord
+    // if (clientLogs && LOGS_CHANNEL_ID) {
+    //     const channel = clientLogs.channels.cache.get(LOGS_CHANNEL_ID);
+    //     if (channel) channel.send(`[${level.toUpperCase()}] Key: **${check.keyName}**\n${message}`);
+    // }
+    res.json({ ok: true });
+});
+
+app.post("/api/update-key-status", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.query;
+    const { status } = req.body; // 'paused', 'resumed'
+
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+
+    const realName = check.keyName;
+    if (status === "paused") {
+        keys[realName].paused = true;
+        console.log(`[KEY STATUS] Key ${realName} pausada.`);
+    } else if (status === "resumed") {
+        keys[realName].paused = false;
+        console.log(`[KEY STATUS] Key ${realName} resumida.`);
+    }
+    await saveKey(realName);
+    res.json({ ok: true });
+});
+
+app.post("/api/clear", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.query;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+
+    console.log(`[CLEAR] Key ${check.keyName} solicitou limpeza de logs.`);
+    res.json({ ok: true });
+});
+
+// Rotas para o Hopper (Roblox Script)
+
+
+
+
+
+
+
+
+
+
+app.post("/api/log", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.query;
+    const { message, level = "info" } = req.body;
+
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+
+    console.log(`[ROBLOX LOG - ${level.toUpperCase()}] Key: ${check.keyName} | ${message}`);
+    // Aqui você pode adicionar lógica para enviar para o canal de logs do Discord
+    // if (clientLogs && LOGS_CHANNEL_ID) {
+    //     const channel = clientLogs.channels.cache.get(LOGS_CHANNEL_ID);
+    //     if (channel) channel.send(`[${level.toUpperCase()}] Key: **${check.keyName}**\n${message}`);
+    // }
+    res.json({ ok: true });
+});
+
+
+
+app.post("/api/clear", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.query;
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+
+    // Lógica para limpar logs associados à chave, se houver
+    console.log(`[CLEAR] Key ${check.keyName} solicitou limpeza de logs.`);
+    res.json({ ok: true });
+});
+
+
+
+app.post("/api/log", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.query;
+    const { message, level = "info" } = req.body;
+
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+
+    console.log(`[ROBLOX LOG - ${level.toUpperCase()}] Key: ${check.keyName} | ${message}`);
+    res.json({ ok: true });
+});
+
+app.post("/api/update-key-status", requireClientHeader, async (req, res) => {
+    const { key, secret, hwid } = req.query;
+    const { status } = req.body;
+
+    const check = checkKey(key, secret, hwid);
+    if (!check.ok) return res.status(403).json({ error: check.error });
+
+    const realName = check.keyName;
+    if (status === "paused") {
+        keys[realName].paused = true;
+        console.log(`[KEY STATUS] Key ${realName} pausada.`);
+    } else if (status === "resumed") {
+        keys[realName].paused = false;
+        console.log(`[KEY STATUS] Key ${realName} resumida.`);
+    }
+    await saveKey(realName);
+    res.json({ ok: true });
+});
+
+
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 
 async function loginBot(client, token, label) { if (!token) { console.warn(`[${label}] Token ausente.`); return; } try { await client.login(token); } catch (e) { console.error(`[${label}] Erro:`, e.message); } }

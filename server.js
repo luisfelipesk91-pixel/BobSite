@@ -329,7 +329,7 @@ function requireClientHeader(req, res, next) {
     if (req.headers["user-agent"] && BLOCKED_UA.some(ua => req.headers["user-agent"].toLowerCase().includes(ua)))
         return res.status(403).send("Forbidden");
     const clientHeader = req.headers["x-bob-client"] || req.headers["x-client-header"];
-    if (clientHeader !== CLIENT_HEADER && clientHeader !== "BobJoiner-v2")
+    if (clientHeader !== CLIENT_HEADER && clientHeader !== RAILWAY_CLIENT)
         return res.status(403).send("Forbidden");
     next();
 }
@@ -387,70 +387,13 @@ app.post("/api/notify", requireClientHeader, async (req, res) => {
     }
     res.status(200).send("OK");
 });
-    if (!payload) return res.status(400).send("Payload ausente");
-    pushBrainrot(payload);
-    res.status(200).send("OK");
-});
 
-app.post("/api/hopper/logs", requireClientHeader, async (req, res) => {
-    if (!safeCompare(req.headers["x-railway-secret"], RAILWAY_SECRET)) return res.status(403).send("Forbidden");
-    const { message } = req.body;
-    if (!message) return res.status(400).send("Mensagem ausente");
-    if (clientLogs && LOGS_CHANNEL_ID) {
-        const channel = await clientLogs.channels.fetch(LOGS_CHANNEL_ID);
-        if (channel) channel.send(`[HOPPER LOG] ${message}`);
-    }
-    res.status(200).send("OK");
-});
-
-app.post("/api/notify", requireClientHeader, async (req, res) => {
-    if (!safeCompare(req.headers["x-railway-secret"], RAILWAY_SECRET)) return res.status(403).send("Forbidden");
-    const { type, message, embed } = req.body;
-    if (!type || !message) return res.status(400).send("Tipo e mensagem ausentes");
-
-    let targetClient = clientNotifier;
-    let targetChannelId = DISCORD_CHANNEL_ID;
-
-    if (type === "log") {
-        targetClient = clientLogs;
-        targetChannelId = LOGS_CHANNEL_ID;
-    } else if (type === "panel") {
-        targetClient = clientPanel;
-        targetChannelId = PANEL_CHANNEL_ID;
-    }
-
-    if (targetClient && targetChannelId) {
-        try {
-            const channel = await targetClient.channels.fetch(targetChannelId);
-            if (channel) {
-                if (embed) {
-                    const discordEmbed = new EmbedBuilder(embed);
-                    await channel.send({ embeds: [discordEmbed] });
-                } else {
-                    await channel.send(message);
-                }
-            }
-        } catch (error) {
-            console.error(`[API/NOTIFY] Erro ao enviar notificação para ${type}: ${error.message}`);
-        }
-    }
-    res.status(200).send("OK");
-});
-    if (!safeCompare(req.headers["x-railway-secret"], RAILWAY_SECRET)) return res.status(403).send("Forbidden");
-    const { message } = req.body;
-    if (!message) return res.status(400).send("Mensagem ausente");
-    if (clientLogs && LOGS_CHANNEL_ID) {
-        const channel = await clientLogs.channels.fetch(LOGS_CHANNEL_ID);
-        if (channel) channel.send(`[HOPPER LOG] ${message}`);
-    }
-    res.status(200).send("OK");
-});
 
 // Lógica para enviar o painel de chaves do BOB LOGS para o CHANNEL ID após o deploy
 clientPanel.on(Events.ClientReady, async () => {
     console.log(`[PANEL] Logado como ${clientPanel.user.tag}`);
-    if (PANEL_CHANNEL_ID) {
-        const channel = await clientPanel.channels.fetch(PANEL_CHANNEL_ID);
+    if (BOB_LOGS_PANEL_CHANNEL) {
+        const channel = await clientPanel.channels.fetch(BOB_LOGS_PANEL_CHANNEL);
         if (channel && channel.type === ChannelType.GuildText) {
             const embed = new EmbedBuilder()
                 .setColor(COLORS.dark)
@@ -511,7 +454,7 @@ function requireClientHeader(req, res, next) {
 }
 
 function checkKey(keyName, secret, hwid) {
-    if (secret !== SCRIPT_SECRET) return { ok: false, error: "Secret invalida." };
+    if (secret !== SCRIPT_SECRET && secret !== RAILWAY_SECRET) return { ok: false, error: "Secret invalida." };
     const realName = findKey(keyName);
     if (!realName) return { ok: false, error: "Key inexistente." };
     const d = keys[realName];
@@ -708,13 +651,7 @@ app.get("/api/latest", requireClientHeader, async (req, res) => {
     res.json({ ok: true, brainrots: brainrots });
 });
 
-app.post("/api/clear", requireClientHeader, async (req, res) => {
-    const { key, secret, hwid } = req.body;
-    const check = checkKey(key, secret, hwid);
-    if (!check.ok) return res.status(403).json({ error: check.error });
-    // Lógica para limpar logs ou outras ações relacionadas à key
-    res.json({ ok: true });
-});
+
 
 // --- JOINER API ROUTES (Existing) ---
 app.get("/api/plans", authenticateToken, async (req, res) => {
@@ -913,13 +850,7 @@ app.get("/api/latest", requireClientHeader, async (req, res) => {
     res.json({ ok: true, brainrots: brainrots });
 });
 
-app.post("/api/clear", requireClientHeader, async (req, res) => {
-    const { key, secret, hwid } = req.body;
-    const check = checkKey(key, secret, hwid);
-    if (!check.ok) return res.status(403).json({ error: check.error });
-    // Lógica para limpar logs ou outras ações relacionadas à key
-    res.json({ ok: true });
-});
+
 
 // Rotas para o Hopper (Roblox Script)
 app.post("/api/brainrot", requireClientHeader, async (req, res) => {
@@ -968,86 +899,6 @@ app.post("/api/update-key-status", requireClientHeader, async (req, res) => {
     res.json({ ok: true });
 });
 
-app.post("/api/clear", requireClientHeader, async (req, res) => {
-    const { key, secret, hwid } = req.query;
-    const check = checkKey(key, secret, hwid);
-    if (!check.ok) return res.status(403).json({ error: check.error });
-
-    console.log(`[CLEAR] Key ${check.keyName} solicitou limpeza de logs.`);
-    res.json({ ok: true });
-});
-
-// Rotas para o Hopper (Roblox Script)
-
-
-
-
-
-
-
-
-
-
-app.post("/api/log", requireClientHeader, async (req, res) => {
-    const { key, secret, hwid } = req.query;
-    const { message, level = "info" } = req.body;
-
-    const check = checkKey(key, secret, hwid);
-    if (!check.ok) return res.status(403).json({ error: check.error });
-
-    console.log(`[ROBLOX LOG - ${level.toUpperCase()}] Key: ${check.keyName} | ${message}`);
-    // Aqui você pode adicionar lógica para enviar para o canal de logs do Discord
-    // if (clientLogs && LOGS_CHANNEL_ID) {
-    //     const channel = clientLogs.channels.cache.get(LOGS_CHANNEL_ID);
-    //     if (channel) channel.send(`[${level.toUpperCase()}] Key: **${check.keyName}**\n${message}`);
-    // }
-    res.json({ ok: true });
-});
-
-
-
-app.post("/api/clear", requireClientHeader, async (req, res) => {
-    const { key, secret, hwid } = req.query;
-    const check = checkKey(key, secret, hwid);
-    if (!check.ok) return res.status(403).json({ error: check.error });
-
-    // Lógica para limpar logs associados à chave, se houver
-    console.log(`[CLEAR] Key ${check.keyName} solicitou limpeza de logs.`);
-    res.json({ ok: true });
-});
-
-
-
-app.post("/api/log", requireClientHeader, async (req, res) => {
-    const { key, secret, hwid } = req.query;
-    const { message, level = "info" } = req.body;
-
-    const check = checkKey(key, secret, hwid);
-    if (!check.ok) return res.status(403).json({ error: check.error });
-
-    console.log(`[ROBLOX LOG - ${level.toUpperCase()}] Key: ${check.keyName} | ${message}`);
-    res.json({ ok: true });
-});
-
-app.post("/api/update-key-status", requireClientHeader, async (req, res) => {
-    const { key, secret, hwid } = req.query;
-    const { status } = req.body;
-
-    const check = checkKey(key, secret, hwid);
-    if (!check.ok) return res.status(403).json({ error: check.error });
-
-    const realName = check.keyName;
-    if (status === "paused") {
-        keys[realName].paused = true;
-        console.log(`[KEY STATUS] Key ${realName} pausada.`);
-    } else if (status === "resumed") {
-        keys[realName].paused = false;
-        console.log(`[KEY STATUS] Key ${realName} resumida.`);
-    }
-    await saveKey(realName);
-    res.json({ ok: true });
-});
-
 
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 
@@ -1059,5 +910,5 @@ loginBot(clientPanel,    DISCORD_TOKEN_PANEL,    "PANEL");
 loginBot(clientPayment,  DISCORD_TOKEN_PAYMENT,  "PAYMENT");
 
 loadKeys();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8080;
 server.listen(port, () => console.log(`[SERVER] Porta ${port} — Bob API online ✅`));

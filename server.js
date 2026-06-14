@@ -702,10 +702,13 @@ app.post("/api/brainrot", requireClientHeader, async (req, res) => {
 });
 
 app.get("/api/latest", requireClientHeader, (req, res) => {
+    console.log("[API] /api/latest chamado - Total brainrots:", brainrots.length);
     const latest = brainrots.length > 0 ? brainrots[brainrots.length - 1] : null;
     if (latest) {
+        console.log("[API] Retornando brainrot:", latest.name, "| Players:", latest.players + "/" + latest.maxPlayers);
         res.json(latest);
     } else {
+        console.log("[API] Nenhum brainrot disponível");
         res.json({ id: null });
     }
 });

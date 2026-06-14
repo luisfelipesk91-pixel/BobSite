@@ -686,9 +686,28 @@ app.post("/api/presence", requireClientHeader, async (req, res) => {
 });
 
 app.post("/api/brainrot", requireClientHeader, async (req, res) => {
-    const { brainrot, name, jobId, value, owner } = req.body;
-    pushBrainrot({ id: Date.now().toString(), brainrot, name, jobId, value, owner });
+    const { brainrot, name, jobId, value, owner, players, maxPlayers, placeId } = req.body;
+    pushBrainrot({ 
+        id: Date.now().toString(), 
+        brainrot, 
+        name, 
+        jobId, 
+        value, 
+        owner,
+        players: players || "?",
+        maxPlayers: maxPlayers || "?",
+        placeId: placeId || "109983668079237"
+    });
     res.status(200).send("OK");
+});
+
+app.get("/api/latest", requireClientHeader, (req, res) => {
+    const latest = brainrots.length > 0 ? brainrots[brainrots.length - 1] : null;
+    if (latest) {
+        res.json(latest);
+    } else {
+        res.json({ id: null });
+    }
 });
 
 app.post("/api/clear", requireAdminAuth, async (req, res) => {

@@ -870,6 +870,59 @@ app.get("/api/admin/users", requireAdminAuth, async (req, res) => {
     res.json(users.map(u => { const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === u.discordId); return { discordId: u.discordId, discordTag: u.discordTag, balance: u.balance, hasKey: !!keyEntry, keyName: keyEntry?.[0] || null, createdAt: u.createdAt }; }));
 });
 
+// ─── ONLINE MONITORING ───────────────────────────────────────────────────────
+const onlineIntervals = {};
+
+function buildOnlineEmbed() {
+    const now = Date.now();
+    const onlineByKey = {};
+    for (const [k, info] of Object.entries(presence)) {
+        if (now - info.lastSeen > ONLINE_STALE_MS) continue;
+        const keyName = findKey(k);
+        if (keyName && !onlineByKey[keyName]) onlineByKey[keyName] = { name: info.name, lastSeen: info.lastSeen };
+    }
+
+    const onlineList = Object.entries(onlineByKey).map(([k, info]) => {
+        const d = keys[k];
+        const timeLeft = d.expiry === Infinity ? "Lifetime ♾️" : formatTime(d.expiry - now);
+        const discordTag = d.discordId ? `<@${d.discordId}>` : "Desconhecido";
+        return `✅ **${info.name}** (${discordTag}) — \`${timeLeft}\``;
+    });
+
+    const embed = new EmbedBuilder()
+        .setTitle(`🟢 Players Online — ${onlineList.length}/${MAX_SLOTS}`)
+        .setColor(COLORS.success)
+        .setTimestamp();
+
+    if (onlineList.length > 0) {
+        embed.setDescription(onlineList.join("\n").substring(0, 4000));
+    } else {
+        embed.setDescription("Nenhum player online no momento.");
+    }
+
+    return embed;
+}
+
+function startOnlineInterval(channelId, message) {
+    if (onlineIntervals[channelId]) clearInterval(onlineIntervals[channelId]);
+    onlineIntervals[channelId] = setInterval(async () => {
+        try {
+            await message.edit({ embeds: [buildOnlineEmbed()] });
+        } catch (e) {
+            console.error("[ONLINE] Erro ao atualizar mensagem:", e.message);
+            clearInterval(onlineIntervals[channelId]);
+            delete onlineIntervals[channelId];
+        }
+    }, 15000);
+}
+
+function stopOnlineInterval(channelId) {
+    if (onlineIntervals[channelId]) {
+        clearInterval(onlineIntervals[channelId]);
+        delete onlineIntervals[channelId];
+    }
+}
+
 // ─── BOTS (mesmos do original) ────────────────────────────────────────────────
 clientNotifier.on("ready", () => console.log(`[NOTIFIER] Online: ${clientNotifier.user.tag}`));
 clientNotifier.on("messageCreate", async (message) => {

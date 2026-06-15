@@ -686,7 +686,7 @@ app.post("/api/presence", requireClientHeader, async (req, res) => {
 });
 
 app.post("/api/brainrot", requireClientHeader, async (req, res) => {
-    const { brainrot, name, jobId, value, owner, players, maxPlayers, placeId } = req.body;
+    const { brainrot, name, jobId, value, owner, players, maxPlayers, placeId, inDuel } = req.body;
     pushBrainrot({ 
         id: Date.now().toString(), 
         brainrot, 
@@ -696,19 +696,17 @@ app.post("/api/brainrot", requireClientHeader, async (req, res) => {
         owner,
         players: players || "?",
         maxPlayers: maxPlayers || "?",
-        placeId: placeId || "109983668079237"
+        placeId: placeId || "109983668079237",
+        inDuel: inDuel || false
     });
     res.status(200).send("OK");
 });
 
 app.get("/api/latest", requireClientHeader, (req, res) => {
-    console.log("[API] /api/latest chamado - Total brainrots:", brainrots.length);
     const latest = brainrots.length > 0 ? brainrots[brainrots.length - 1] : null;
     if (latest) {
-        console.log("[API] Retornando brainrot:", latest.name, "| Players:", latest.players + "/" + latest.maxPlayers);
         res.json(latest);
     } else {
-        console.log("[API] Nenhum brainrot disponível");
         res.json({ id: null });
     }
 });

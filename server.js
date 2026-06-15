@@ -78,7 +78,7 @@ console.log("[CONFIG] DISCORD_CLIENT_ID:", DISCORD_CLIENT_ID ? "✓ Configurado"
 
 const ADMIN_ROLE_IDS = process.env.ADMIN_ROLE_IDS ? process.env.ADMIN_ROLE_IDS.split(",") : ["1477885793144930496","1501356382677373101","1477885797553148066"];
 const RECHARGE_CHANNEL = process.env.RECHARGE_CHANNEL || "1511517095412895905";
-const MIN_RECHARGE = parseInt(process.env.MIN_RECHARGE || "5");
+const MIN_RECHARGE = parseInt(process.env.MIN_RECHARGE || "1");
 
 // --- INITIALIZE DISCORD CLIENTS FIRST ---
 const clientNotifier = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildWebhooks] });

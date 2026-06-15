@@ -60,10 +60,11 @@ const PANEL_CHANNEL_ID       = process.env.PANEL_CHANNEL_ID        || "";
 const LOGS_CHANNEL_ID        = process.env.LOGS_CHANNEL_ID         || "";
 const BOB_LOGS_PANEL_CHANNEL = process.env.BOB_LOGS_PANEL_CHANNEL  || "";
 const SCRIPT_URL             = process.env.SCRIPT_URL              || "";
-const FRONTEND_URL           = process.env.FRONTEND_URL            || "https://bob-html-one.vercel.app";
+const BACKEND_URL            = "https://bob-notifier.up.railway.app"; // URL da API Railway
+const FRONTEND_URL           = process.env.FRONTEND_URL            || "https://bob-html-one.vercel.app"; // URL do site Vercel
 const DISCORD_CLIENT_ID      = process.env.DISCORD_CLIENT_ID       || "";
 const DISCORD_CLIENT_SECRET  = process.env.DISCORD_CLIENT_SECRET   || "";
-const REDIRECT_URI           = `${FRONTEND_URL}/auth/callback`;
+const REDIRECT_URI           = `${BACKEND_URL}/auth/callback`; // Callback vai pro Railway
 
 const ADMIN_ROLE_IDS = process.env.ADMIN_ROLE_IDS ? process.env.ADMIN_ROLE_IDS.split(",") : ["1477885793144930496","1501356382677373101","1477885797553148066"];
 const RECHARGE_CHANNEL = process.env.RECHARGE_CHANNEL || "1511517095412895905";

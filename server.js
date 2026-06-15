@@ -634,7 +634,7 @@ async function requireAdminAuth(req, res, next) {
         // Ou, para chamadas de API internas/scripts, podemos usar um secret adicional
         const secret = req.headers["x-admin-secret"];
         if (secret && safeCompare(secret, ADMIN_PASS)) {
-            next(); // Permite acesso se o secret de admin estiver correto
+            return next(); // Permite acesso se o secret de admin estiver correto
         } else {
             return res.status(403).json({ error: "Acesso negado. Requer privilégios de administrador ou secret válido." });
         }

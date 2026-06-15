@@ -757,13 +757,23 @@ app.get("/auth/callback", async (req, res) => {
     console.log("[AUTH CALLBACK] Recebido code:", code ? "SIM" : "NÃO");
     if (!code) return res.redirect(`${FRONTEND_URL}?error=no_code`);
     try {
+        console.log("[AUTH CALLBACK] Enviando requisição para Discord...");
+        console.log("[AUTH CALLBACK] client_id:", DISCORD_CLIENT_ID);
+        console.log("[AUTH CALLBACK] redirect_uri:", REDIRECT_URI);
+        
         const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
             method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: new URLSearchParams({ client_id: DISCORD_CLIENT_ID, client_secret: DISCORD_CLIENT_SECRET, grant_type: "authorization_code", code, redirect_uri: REDIRECT_URI }),
         });
+        
+        console.log("[AUTH CALLBACK] Status da resposta:", tokenRes.status);
         const tokenData = await tokenRes.json();
-        console.log("[AUTH CALLBACK] Token data:", tokenData);
-        if (!tokenData.access_token) return res.redirect(`${FRONTEND_URL}?error=token`);
+        console.log("[AUTH CALLBACK] Token data completo:", JSON.stringify(tokenData, null, 2));
+        
+        if (!tokenData.access_token) {
+            console.error("[AUTH CALLBACK] ❌ Sem access_token! Erro:", tokenData.error, tokenData.error_description);
+            return res.redirect(`${FRONTEND_URL}?error=token`);
+        }
         const userRes = await fetch("https://discord.com/api/users/@me", { headers: { Authorization: `Bearer ${tokenData.access_token}` } });
         const discordUser = await userRes.json();
         await User.findOneAndUpdate({ discordId: discordUser.id }, { discordTag: discordUser.username, avatar: discordUser.avatar }, { upsert: true, new: true });

@@ -78,7 +78,7 @@ console.log("[CONFIG] DISCORD_CLIENT_ID:", DISCORD_CLIENT_ID ? "✓ Configurado"
 
 const ADMIN_ROLE_IDS = process.env.ADMIN_ROLE_IDS ? process.env.ADMIN_ROLE_IDS.split(",") : ["1477885793144930496","1501356382677373101","1477885797553148066"];
 const RECHARGE_CHANNEL = process.env.RECHARGE_CHANNEL || "1511517095412895905";
-const MIN_RECHARGE = parseInt(process.env.MIN_RECHARGE || "1");
+const MIN_RECHARGE = parseInt(process.env.MIN_RECHARGE || "5");
 
 // --- INITIALIZE DISCORD CLIENTS FIRST ---
 const clientNotifier = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildWebhooks] });
@@ -997,18 +997,22 @@ app.post("/api/payment/create", requireAuth, async (req, res) => {
             
             goatpayData = responseData.data;
             
-            // Salva no banco
-            const payment = await Payment.create({
-                discordId: req.user.discordId,
-                discordTag: user.discordTag,
-                amount: Number(amount),
-                method,
-                gatewayId: goatpayData.id,
-                pixCode: goatpayData.copyPaste,
-                pixQrCode: goatpayData.qrCodeBase64?.replace('data:image/png;base64,', ''),
-                expiresAt: new Date(goatpayData.expiresAt),
-                status: "pending"
-            });
+            // Salva ou atualiza no banco (usando upsert para evitar duplicatas)
+            const payment = await Payment.findOneAndUpdate(
+                { gatewayId: goatpayData.id },
+                {
+                    discordId: req.user.discordId,
+                    discordTag: user.discordTag,
+                    amount: Number(amount),
+                    method,
+                    gatewayId: goatpayData.id,
+                    pixCode: goatpayData.copyPaste,
+                    pixQrCode: goatpayData.qrCodeBase64?.replace('data:image/png;base64,', ''),
+                    expiresAt: new Date(goatpayData.expiresAt),
+                    status: "pending"
+                },
+                { upsert: true, new: true }
+            );
             
             res.json({
                 ok: true,
@@ -1055,19 +1059,23 @@ app.post("/api/payment/create", requireAuth, async (req, res) => {
             
             goatpayData = responseData.data;
             
-            // Salva no banco
-            const payment = await Payment.create({
-                discordId: req.user.discordId,
-                discordTag: user.discordTag,
-                amount: Number(amount),
-                method,
-                gatewayId: goatpayData.id,
-                cryptoAddress: goatpayData.payAddress,
-                cryptoCurrency: currency.toUpperCase(),
-                cryptoAmount: goatpayData.payAmount,
-                expiresAt: new Date(goatpayData.expiresAt),
-                status: "pending"
-            });
+            // Salva ou atualiza no banco (usando upsert para evitar duplicatas)
+            const payment = await Payment.findOneAndUpdate(
+                { gatewayId: goatpayData.id },
+                {
+                    discordId: req.user.discordId,
+                    discordTag: user.discordTag,
+                    amount: Number(amount),
+                    method,
+                    gatewayId: goatpayData.id,
+                    cryptoAddress: goatpayData.payAddress,
+                    cryptoCurrency: currency.toUpperCase(),
+                    cryptoAmount: goatpayData.payAmount,
+                    expiresAt: new Date(goatpayData.expiresAt),
+                    status: "pending"
+                },
+                { upsert: true, new: true }
+            );
             
             res.json({
                 ok: true,

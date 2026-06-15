@@ -172,6 +172,25 @@ const RechargeSchema = new mongoose.Schema({
 });
 const Recharge = mongoose.model("Recharge", RechargeSchema);
 
+// Schema para pagamentos automáticos via gateway
+const PaymentSchema = new mongoose.Schema({
+    discordId:    { type: String, required: true },
+    discordTag:   String,
+    amount:       { type: Number, required: true },
+    method:       { type: String, required: true }, // pix | crypto
+    gatewayId:    { type: String, unique: true }, // ID do pagamento no gateway
+    status:       { type: String, default: "pending" }, // pending | paid | expired | cancelled
+    pixCode:      String, // Código PIX (se método for PIX)
+    pixQrCode:    String, // QR Code base64 (se método for PIX)
+    cryptoAddress: String, // Endereço da carteira (se método for cripto)
+    cryptoCurrency: String, // BTC, ETH, USDT, etc
+    webhookDeliveryId: String, // ID da entrega do webhook (idempotência)
+    expiresAt:    Date,
+    paidAt:       Date,
+    createdAt:    { type: Date, default: Date.now },
+});
+const Payment = mongoose.model("Payment", PaymentSchema);
+
 const keys = {}, brainrots = [], presence = {}, kicked = {}, userJobIds = {}, blockedIPs = {};
 
 function xorObfuscate(value) {
@@ -911,6 +930,199 @@ app.post("/api/recharge/create", requireAuth, async (req, res) => {
 app.get("/api/recharge/status", requireAuth, async (req, res) => {
     const recharge = await Recharge.findOne({ discordId: req.user.discordId, status: "pending" }).sort({ createdAt: -1 });
     res.json(recharge ? { pending: true, code: recharge.code, amount: recharge.amount, createdAt: recharge.createdAt } : { pending: false });
+});
+
+// ─── PAGAMENTO AUTOMÁTICO (GOATPAY) ───────────────────────────────────────────
+const GOATPAY_API_KEY = process.env.GOATPAY_API_KEY || "";
+const GOATPAY_API_URL = "https://api.goatpay.com.br/v1";
+const GOATPAY_WEBHOOK_SECRET = process.env.GOATPAY_WEBHOOK_SECRET || "";
+
+app.post("/api/payment/create", requireAuth, async (req, res) => {
+    const { amount, method } = req.body; // method: 'pix' ou 'crypto'
+    
+    if (!amount || isNaN(amount) || amount < MIN_RECHARGE) {
+        return res.status(400).json({ error: `Valor mínimo é R$${MIN_RECHARGE}` });
+    }
+    
+    if (!['pix', 'crypto'].includes(method)) {
+        return res.status(400).json({ error: "Método inválido. Use 'pix' ou 'crypto'" });
+    }
+    
+    const user = await User.findOne({ discordId: req.user.discordId });
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+    
+    try {
+        // Cancela pagamentos pendentes antigos
+        await Payment.updateMany({ 
+            discordId: req.user.discordId, 
+            status: "pending",
+            method 
+        }, { status: "cancelled" });
+        
+        let goatpayData;
+        
+        if (method === 'pix') {
+            // Cria cobrança PIX no GoatPay
+            console.log("[PAYMENT] Criando cobrança PIX no GoatPay...");
+            
+            const goatpayResponse = await fetch(`${GOATPAY_API_URL}/payment-pix/create`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-API-Key": GOATPAY_API_KEY
+                },
+                body: JSON.stringify({
+                    amount: Number(amount),
+                    description: `Depósito - ${user.discordTag}`,
+                    externalReference: req.user.discordId,
+                    coverFee: false
+                })
+            });
+            
+            const responseData = await goatpayResponse.json();
+            console.log("[PAYMENT] Resposta GoatPay:", responseData);
+            
+            if (!responseData.success) {
+                return res.status(500).json({ error: responseData.message || "Erro ao criar pagamento" });
+            }
+            
+            goatpayData = responseData.data;
+            
+            // Salva no banco
+            const payment = await Payment.create({
+                discordId: req.user.discordId,
+                discordTag: user.discordTag,
+                amount: Number(amount),
+                method,
+                gatewayId: goatpayData.id,
+                pixCode: goatpayData.copyPaste,
+                pixQrCode: goatpayData.qrCodeBase64?.replace('data:image/png;base64,', ''),
+                expiresAt: new Date(goatpayData.expiresAt),
+                status: "pending"
+            });
+            
+            res.json({
+                ok: true,
+                paymentId: payment._id,
+                gatewayId: payment.gatewayId,
+                method: payment.method,
+                amount: payment.amount,
+                pixCode: payment.pixCode,
+                pixQrCode: payment.pixQrCode,
+                expiresAt: payment.expiresAt
+            });
+            
+        } else {
+            // Cripto ainda não implementado
+            return res.status(501).json({ error: "Pagamento via cripto em breve" });
+        }
+        
+    } catch (e) {
+        console.error("[PAYMENT] Erro ao criar pagamento:", e.message);
+        res.status(500).json({ error: "Erro ao processar pagamento" });
+    }
+});
+
+app.get("/api/payment/status/:paymentId", requireAuth, async (req, res) => {
+    const payment = await Payment.findOne({ _id: req.params.paymentId, discordId: req.user.discordId });
+    if (!payment) return res.status(404).json({ error: "Pagamento não encontrado" });
+    
+    res.json({
+        status: payment.status,
+        amount: payment.amount,
+        method: payment.method,
+        createdAt: payment.createdAt,
+        paidAt: payment.paidAt,
+        expiresAt: payment.expiresAt
+    });
+});
+
+// Webhook do GoatPay (chamado automaticamente quando o pagamento é confirmado)
+app.post("/api/payment/webhook", async (req, res) => {
+    console.log("[GOATPAY WEBHOOK] Recebido:", JSON.stringify(req.body, null, 2));
+    console.log("[GOATPAY WEBHOOK] Headers:", req.headers);
+    
+    try {
+        // Verifica assinatura HMAC do GoatPay
+        const signature = req.headers['x-goatpay-signature'];
+        if (GOATPAY_WEBHOOK_SECRET) {
+            const rawBody = JSON.stringify(req.body);
+            const expectedSignature = 'sha256=' + crypto.createHmac('sha256', GOATPAY_WEBHOOK_SECRET)
+                .update(rawBody)
+                .digest('hex');
+            
+            if (signature !== expectedSignature) {
+                console.error("[GOATPAY WEBHOOK] ❌ Assinatura inválida!");
+                return res.status(401).json({ error: "Assinatura inválida" });
+            }
+        }
+        
+        const { id: deliveryId, event, data } = req.body;
+        
+        // Idempotência: verifica se já processou essa entrega
+        if (await Payment.findOne({ 'webhookDeliveryId': deliveryId })) {
+            console.log("[GOATPAY WEBHOOK] Entrega já processada:", deliveryId);
+            return res.status(200).json({ ok: true });
+        }
+        
+        // Processa evento payment.paid
+        if (event === 'payment.paid' && data.type === 'PIX_IN') {
+            const payment = await Payment.findOne({ gatewayId: data.id, status: "pending" });
+            
+            if (!payment) {
+                console.log("[GOATPAY WEBHOOK] Pagamento não encontrado ou já processado:", data.id);
+                return res.status(200).json({ ok: true });
+            }
+            
+            // Atualiza status do pagamento
+            payment.status = "paid";
+            payment.paidAt = new Date(data.completedAt || Date.now());
+            payment.webhookDeliveryId = deliveryId;
+            await payment.save();
+            
+            // Adiciona saldo ao usuário
+            const user = await User.findOne({ discordId: payment.discordId });
+            if (user) {
+                user.balance += payment.amount;
+                await user.save();
+                
+                await Transaction.create({
+                    discordId: payment.discordId,
+                    type: "deposit",
+                    amount: payment.amount,
+                    description: `Depósito via PIX - ID: ${data.id}`
+                });
+                
+                console.log(`[GOATPAY WEBHOOK] ✅ Saldo adicionado! Usuário: ${user.discordTag}, Valor: R$${payment.amount}`);
+                
+                // Notifica no Discord
+                try {
+                    const ch = await clientPayment.channels.fetch(RECHARGE_CHANNEL);
+                    if (ch) {
+                        const embed = new EmbedBuilder()
+                            .setColor(COLORS.success)
+                            .setTitle("💰 Pagamento PIX Confirmado (GoatPay)")
+                            .addFields(
+                                { name: "👤 Usuário", value: `${user.discordTag} (<@${payment.discordId}>)`, inline: true },
+                                { name: "💵 Valor", value: `**R$${payment.amount.toFixed(2)}**`, inline: true },
+                                { name: "💳 Método", value: "PIX", inline: true },
+                                { name: "🆔 Transaction ID", value: `\`${data.id}\``, inline: false },
+                                { name: "🔗 End-to-End", value: `\`${data.endToEndId || 'N/A'}\``, inline: false },
+                                { name: "💰 Novo Saldo", value: `**R$${user.balance.toFixed(2)}**`, inline: false }
+                            )
+                            .setTimestamp();
+                        await ch.send({ embeds: [embed] });
+                    }
+                } catch(e) { console.error("[GOATPAY WEBHOOK] Erro ao notificar Discord:", e.message); }
+            }
+        }
+        
+        res.status(200).json({ ok: true });
+        
+    } catch (e) {
+        console.error("[GOATPAY WEBHOOK] Erro:", e.message);
+        res.status(500).json({ error: "Erro ao processar webhook" });
+    }
 });
 
 app.post("/api/admin/balance", requireAdminAuth, async (req, res) => {

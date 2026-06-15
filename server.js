@@ -661,10 +661,13 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "public", "index.html"));
+    res.json({ 
+        status: "online", 
+        message: "Bob Joiner API",
+        frontend: "https://bob-html-one.vercel.app"
+    });
 });
 
 // --- ROTAS DA API ---

@@ -66,6 +66,16 @@ const DISCORD_CLIENT_ID      = process.env.DISCORD_CLIENT_ID       || "";
 const DISCORD_CLIENT_SECRET  = process.env.DISCORD_CLIENT_SECRET   || "";
 const REDIRECT_URI           = `${BACKEND_URL}/auth/callback`; // Callback vai pro Railway
 
+// Validação das credenciais do Discord
+if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET) {
+    console.error("[FATAL] DISCORD_CLIENT_ID ou DISCORD_CLIENT_SECRET não configurado!");
+    console.error("[FATAL] Configure as variáveis de ambiente no Railway");
+}
+console.log("[CONFIG] BACKEND_URL:", BACKEND_URL);
+console.log("[CONFIG] FRONTEND_URL:", FRONTEND_URL);
+console.log("[CONFIG] REDIRECT_URI:", REDIRECT_URI);
+console.log("[CONFIG] DISCORD_CLIENT_ID:", DISCORD_CLIENT_ID ? "✓ Configurado" : "✗ FALTANDO");
+
 const ADMIN_ROLE_IDS = process.env.ADMIN_ROLE_IDS ? process.env.ADMIN_ROLE_IDS.split(",") : ["1477885793144930496","1501356382677373101","1477885797553148066"];
 const RECHARGE_CHANNEL = process.env.RECHARGE_CHANNEL || "1511517095412895905";
 const MIN_RECHARGE = parseInt(process.env.MIN_RECHARGE || "5");
@@ -736,12 +746,15 @@ app.post("/api/update-key-status", requireClientHeader, async (req, res) => {
 
 // ─── DISCORD OAUTH2 ───────────────────────────────────────────────────────────
 app.get("/auth/discord", (req, res) => {
+    console.log("[AUTH] DISCORD_CLIENT_ID:", DISCORD_CLIENT_ID);
+    console.log("[AUTH] REDIRECT_URI:", REDIRECT_URI);
     const params = new URLSearchParams({ client_id: DISCORD_CLIENT_ID, redirect_uri: REDIRECT_URI, response_type: "code", scope: "identify" });
     res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
 });
 
 app.get("/auth/callback", async (req, res) => {
     const { code } = req.query;
+    console.log("[AUTH CALLBACK] Recebido code:", code ? "SIM" : "NÃO");
     if (!code) return res.redirect(`${FRONTEND_URL}?error=no_code`);
     try {
         const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
@@ -749,6 +762,7 @@ app.get("/auth/callback", async (req, res) => {
             body: new URLSearchParams({ client_id: DISCORD_CLIENT_ID, client_secret: DISCORD_CLIENT_SECRET, grant_type: "authorization_code", code, redirect_uri: REDIRECT_URI }),
         });
         const tokenData = await tokenRes.json();
+        console.log("[AUTH CALLBACK] Token data:", tokenData);
         if (!tokenData.access_token) return res.redirect(`${FRONTEND_URL}?error=token`);
         const userRes = await fetch("https://discord.com/api/users/@me", { headers: { Authorization: `Bearer ${tokenData.access_token}` } });
         const discordUser = await userRes.json();

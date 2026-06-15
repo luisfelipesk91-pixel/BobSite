@@ -183,7 +183,8 @@ const PaymentSchema = new mongoose.Schema({
     pixCode:      String, // Código PIX (se método for PIX)
     pixQrCode:    String, // QR Code base64 (se método for PIX)
     cryptoAddress: String, // Endereço da carteira (se método for cripto)
-    cryptoCurrency: String, // BTC, ETH, USDT, etc
+    cryptoCurrency: String, // BTC, LTC, etc
+    cryptoAmount: Number, // Quantidade em cripto que deve ser enviada
     webhookDeliveryId: String, // ID da entrega do webhook (idempotência)
     expiresAt:    Date,
     paidAt:       Date,
@@ -939,16 +940,21 @@ app.get("/api/recharge/status", requireAuth, async (req, res) => {
 const GOATPAY_API_KEY = process.env.GOATPAY_API_KEY || "";
 const GOATPAY_API_URL = "https://api.goatpay.com.br/v1";
 const GOATPAY_WEBHOOK_SECRET = process.env.GOATPAY_WEBHOOK_SECRET || "";
+const MIN_DEPOSIT = 0.10; // R$ 0,10 centavos
 
 app.post("/api/payment/create", requireAuth, async (req, res) => {
-    const { amount, method } = req.body; // method: 'pix' ou 'crypto'
+    const { amount, method, currency } = req.body; // method: 'pix' ou 'crypto', currency: 'btc' ou 'ltc'
     
-    if (!amount || isNaN(amount) || amount < MIN_RECHARGE) {
-        return res.status(400).json({ error: `Valor mínimo é R$${MIN_RECHARGE}` });
+    if (!amount || isNaN(amount) || amount < MIN_DEPOSIT) {
+        return res.status(400).json({ error: `Valor mínimo é R$${MIN_DEPOSIT.toFixed(2)}` });
     }
     
     if (!['pix', 'crypto'].includes(method)) {
         return res.status(400).json({ error: "Método inválido. Use 'pix' ou 'crypto'" });
+    }
+    
+    if (method === 'crypto' && !['btc', 'ltc'].includes(currency)) {
+        return res.status(400).json({ error: "Moeda inválida. Use 'btc' ou 'ltc'" });
     }
     
     const user = await User.findOne({ discordId: req.user.discordId });
@@ -1015,9 +1021,65 @@ app.post("/api/payment/create", requireAuth, async (req, res) => {
                 expiresAt: payment.expiresAt
             });
             
-        } else {
-            // Cripto ainda não implementado
-            return res.status(501).json({ error: "Pagamento via cripto em breve" });
+        } else if (method === 'crypto') {
+            // Mapeia currency para payCurrency do GoatPay
+            const payCurrencyMap = {
+                'btc': 'btc',
+                'ltc': 'ltc'
+            };
+            const payCurrency = payCurrencyMap[currency];
+            
+            console.log("[PAYMENT] Criando depósito cripto no GoatPay...");
+            
+            const goatpayResponse = await fetch(`${GOATPAY_API_URL}/payment-crypto/create`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-API-Key": GOATPAY_API_KEY
+                },
+                body: JSON.stringify({
+                    amount: Number(amount),
+                    payCurrency: payCurrency,
+                    description: `Depósito ${currency.toUpperCase()} - ${user.discordTag}`,
+                    externalReference: req.user.discordId,
+                    coverFee: false
+                })
+            });
+            
+            const responseData = await goatpayResponse.json();
+            console.log("[PAYMENT] Resposta GoatPay Cripto:", responseData);
+            
+            if (!responseData.success) {
+                return res.status(500).json({ error: responseData.message || "Erro ao criar pagamento cripto" });
+            }
+            
+            goatpayData = responseData.data;
+            
+            // Salva no banco
+            const payment = await Payment.create({
+                discordId: req.user.discordId,
+                discordTag: user.discordTag,
+                amount: Number(amount),
+                method,
+                gatewayId: goatpayData.id,
+                cryptoAddress: goatpayData.payAddress,
+                cryptoCurrency: currency.toUpperCase(),
+                cryptoAmount: goatpayData.payAmount,
+                expiresAt: new Date(goatpayData.expiresAt),
+                status: "pending"
+            });
+            
+            res.json({
+                ok: true,
+                paymentId: payment._id,
+                gatewayId: payment.gatewayId,
+                method: payment.method,
+                amount: payment.amount,
+                cryptoAddress: payment.cryptoAddress,
+                cryptoCurrency: payment.cryptoCurrency,
+                cryptoAmount: payment.cryptoAmount,
+                expiresAt: payment.expiresAt
+            });
         }
         
     } catch (e) {
@@ -1068,12 +1130,12 @@ app.post("/api/payment/webhook", async (req, res) => {
             return res.status(200).json({ ok: true });
         }
         
-        // Processa evento payment.paid
+        // Processa evento payment.paid (PIX)
         if (event === 'payment.paid' && data.type === 'PIX_IN') {
             const payment = await Payment.findOne({ gatewayId: data.id, status: "pending" });
             
             if (!payment) {
-                console.log("[GOATPAY WEBHOOK] Pagamento não encontrado ou já processado:", data.id);
+                console.log("[GOATPAY WEBHOOK] Pagamento PIX não encontrado ou já processado:", data.id);
                 return res.status(200).json({ ok: true });
             }
             
@@ -1111,6 +1173,59 @@ app.post("/api/payment/webhook", async (req, res) => {
                                 { name: "💳 Método", value: "PIX", inline: true },
                                 { name: "🆔 Transaction ID", value: `\`${data.id}\``, inline: false },
                                 { name: "🔗 End-to-End", value: `\`${data.endToEndId || 'N/A'}\``, inline: false },
+                                { name: "💰 Novo Saldo", value: `**R$${user.balance.toFixed(2)}**`, inline: false }
+                            )
+                            .setTimestamp();
+                        await ch.send({ embeds: [embed] });
+                    }
+                } catch(e) { console.error("[GOATPAY WEBHOOK] Erro ao notificar Discord:", e.message); }
+            }
+        }
+        
+        // Processa evento payment.crypto.paid (CRIPTO)
+        if (event === 'payment.crypto.paid' && data.type === 'CRYPTO_IN') {
+            const payment = await Payment.findOne({ gatewayId: data.id, status: "pending" });
+            
+            if (!payment) {
+                console.log("[GOATPAY WEBHOOK] Pagamento CRIPTO não encontrado ou já processado:", data.id);
+                return res.status(200).json({ ok: true });
+            }
+            
+            // Atualiza status do pagamento
+            payment.status = "paid";
+            payment.paidAt = new Date(data.completedAt || Date.now());
+            payment.webhookDeliveryId = deliveryId;
+            await payment.save();
+            
+            // Adiciona saldo ao usuário
+            const user = await User.findOne({ discordId: payment.discordId });
+            if (user) {
+                user.balance += payment.amount;
+                await user.save();
+                
+                await Transaction.create({
+                    discordId: payment.discordId,
+                    type: "deposit",
+                    amount: payment.amount,
+                    description: `Depósito via ${payment.cryptoCurrency} - ID: ${data.id}`
+                });
+                
+                console.log(`[GOATPAY WEBHOOK] ✅ Saldo cripto adicionado! Usuário: ${user.discordTag}, Valor: R$${payment.amount}`);
+                
+                // Notifica no Discord
+                try {
+                    const ch = await clientPayment.channels.fetch(RECHARGE_CHANNEL);
+                    if (ch) {
+                        const embed = new EmbedBuilder()
+                            .setColor(COLORS.success)
+                            .setTitle("🪙 Pagamento CRIPTO Confirmado (GoatPay)")
+                            .addFields(
+                                { name: "👤 Usuário", value: `${user.discordTag} (<@${payment.discordId}>)`, inline: true },
+                                { name: "💵 Valor (BRL)", value: `**R$${payment.amount.toFixed(2)}**`, inline: true },
+                                { name: "💳 Moeda", value: payment.cryptoCurrency, inline: true },
+                                { name: "💎 Quantidade", value: `${payment.cryptoAmount} ${payment.cryptoCurrency}`, inline: true },
+                                { name: "📬 Endereço", value: `\`${payment.cryptoAddress}\``, inline: false },
+                                { name: "🆔 Transaction ID", value: `\`${data.id}\``, inline: false },
                                 { name: "💰 Novo Saldo", value: `**R$${user.balance.toFixed(2)}**`, inline: false }
                             )
                             .setTimestamp();

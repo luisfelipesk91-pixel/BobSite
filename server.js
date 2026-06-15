@@ -940,7 +940,7 @@ app.get("/api/recharge/status", requireAuth, async (req, res) => {
 const GOATPAY_API_KEY = process.env.GOATPAY_API_KEY || "";
 const GOATPAY_API_URL = "https://api.goatpay.com.br/v1";
 const GOATPAY_WEBHOOK_SECRET = process.env.GOATPAY_WEBHOOK_SECRET || "";
-const MIN_DEPOSIT = 0.10; // R$ 0,10 centavos
+const MIN_DEPOSIT = 1.00; // R$ 1,00
 
 app.post("/api/payment/create", requireAuth, async (req, res) => {
     const { amount, method, currency } = req.body; // method: 'pix' ou 'crypto', currency: 'btc' ou 'ltc'

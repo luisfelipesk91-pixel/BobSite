@@ -973,6 +973,7 @@ app.post("/api/payment/create", requireAuth, async (req, res) => {
         if (method === 'pix') {
             // Cria cobrança PIX no GoatPay
             console.log("[PAYMENT] Criando cobrança PIX no GoatPay...");
+            console.log("[PAYMENT] Valor solicitado:", Number(amount), "BRL");
             
             const goatpayResponse = await fetch(`${GOATPAY_API_URL}/payment-pix/create`, {
                 method: "POST",

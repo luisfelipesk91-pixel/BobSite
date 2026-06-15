@@ -776,11 +776,16 @@ app.get("/auth/callback", async (req, res) => {
         }
         const userRes = await fetch("https://discord.com/api/users/@me", { headers: { Authorization: `Bearer ${tokenData.access_token}` } });
         const discordUser = await userRes.json();
+        console.log("[AUTH CALLBACK] Discord user:", discordUser.username);
+        
         await User.findOneAndUpdate({ discordId: discordUser.id }, { discordTag: discordUser.username, avatar: discordUser.avatar }, { upsert: true, new: true });
         const autoKeyName = await createAutoKeyForUser(discordUser.id, discordUser.username);
         console.log(`[AUTH] Key do usuário ${discordUser.username}: ${autoKeyName}`);
+        
         const token = jwt.sign({ discordId: discordUser.id, discordTag: discordUser.username, avatar: discordUser.avatar }, JWT_SECRET, { expiresIn: "7d" });
-        res.redirect(`${FRONTEND_URL}/?token=${token}`);
+        const redirectUrl = `${FRONTEND_URL}/?token=${token}`;
+        console.log("[AUTH CALLBACK] ✅ Redirecionando para:", redirectUrl);
+        res.redirect(redirectUrl);
     } catch (e) { console.error("[AUTH]", e.message); res.redirect(`${FRONTEND_URL}?error=auth_failed`); }
 });
 

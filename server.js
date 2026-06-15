@@ -975,6 +975,9 @@ app.post("/api/payment/create", requireAuth, async (req, res) => {
             console.log("[PAYMENT] Criando cobrança PIX no GoatPay...");
             console.log("[PAYMENT] Valor solicitado:", Number(amount), "BRL");
             
+            // Usa timestamp único para evitar duplicatas no GoatPay
+            const uniqueRef = `${req.user.discordId}_${Date.now()}`;
+            
             const goatpayResponse = await fetch(`${GOATPAY_API_URL}/payment-pix/create`, {
                 method: "POST",
                 headers: {
@@ -983,8 +986,8 @@ app.post("/api/payment/create", requireAuth, async (req, res) => {
                 },
                 body: JSON.stringify({
                     amount: Number(amount),
-                    description: `Depósito - ${user.discordTag}`,
-                    externalReference: req.user.discordId,
+                    description: `Depósito ${Number(amount).toFixed(2)} - ${user.discordTag}`,
+                    externalReference: uniqueRef,
                     coverFee: false
                 })
             });
@@ -1036,6 +1039,9 @@ app.post("/api/payment/create", requireAuth, async (req, res) => {
             
             console.log("[PAYMENT] Criando depósito cripto no GoatPay...");
             
+            // Usa timestamp único para evitar duplicatas no GoatPay
+            const uniqueRef = `${req.user.discordId}_${Date.now()}`;
+            
             const goatpayResponse = await fetch(`${GOATPAY_API_URL}/payment-crypto/create`, {
                 method: "POST",
                 headers: {
@@ -1045,8 +1051,8 @@ app.post("/api/payment/create", requireAuth, async (req, res) => {
                 body: JSON.stringify({
                     amount: Number(amount),
                     payCurrency: payCurrency,
-                    description: `Depósito ${currency.toUpperCase()} - ${user.discordTag}`,
-                    externalReference: req.user.discordId,
+                    description: `Depósito ${currency.toUpperCase()} ${Number(amount).toFixed(2)} - ${user.discordTag}`,
+                    externalReference: uniqueRef,
                     coverFee: false
                 })
             });

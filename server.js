@@ -46,6 +46,17 @@ const XOR_KEY       = requireEnv("XOR_KEY");
 const MONGODB_URI   = requireEnv("MONGODB_URI");
 const JWT_SECRET    = process.env.JWT_SECRET || "bobjoiner_jwt_secret_2026";
 
+// ─── BOBLOGS (BOT DISCORD) ────────────────────────────────────────────────────
+// O BobLogs é o bot do Discord (clientLogs) que gerencia as keys
+// Habilite isto se quiser que o BobLogs gerencie as keys via comandos
+const BOBLOGS_ENABLED = process.env.BOBLOGS_ENABLED === "true";
+
+if (BOBLOGS_ENABLED) {
+    console.log("[BOBLOGS] Integração com bot Discord habilitada");
+} else {
+    console.log("[BOBLOGS] Modo local (sem integração com bot)");
+}
+
 const CLIENT_HEADER          = process.env.CLIENT_HEADER           || "BobJoiner-v2";
 const RAILWAY_CLIENT         = process.env.RAILWAY_CLIENT          || "Bobnotify"; // Client para o Hopper
 const PIX_KEY                = process.env.PIX_KEY                 || "";
@@ -230,6 +241,72 @@ const formatTimeShort = (ms) => {
     if (m > 0) return `${m}m ${s}s`;
     return `${s}s`;
 };
+
+// ─── INTEGRAÇÃO COM BOBLOGS (BOT DISCORD) ────────────────────────────────────
+// O BobLogs é o bot do Discord que gerencia as keys
+// Ele usa o clientLogs (DISCORD_TOKEN_LOGS)
+
+async function bobLogsCreateKey(discordId, discordTag, hours) {
+    try {
+        // Envia comando para o canal do BobLogs criar a key
+        const channel = await clientLogs.channels.fetch(BOB_LOGS_PANEL_CHANNEL);
+        if (!channel) {
+            throw new Error("Canal do BobLogs não encontrado");
+        }
+        
+        // Gera um nome de key único
+        const keyName = generateBobKey();
+        
+        // Comando para criar key no BobLogs (ajuste conforme os comandos do seu bot)
+        await channel.send(`!createkey ${keyName} ${hours}h ${discordId}`);
+        
+        console.log(`[BOBLOGS] ✅ Comando enviado para criar key: ${keyName} (${hours}h) para ${discordTag}`);
+        
+        // Salva localmente também para referência rápida
+        keys[keyName] = {
+            expiry: Date.now() + (hours * 3600 * 1000),
+            paused: false,
+            remaining: 0,
+            hwid: null,
+            discordId: discordId,
+            warnSent: false,
+            isAutoKey: false,
+            managedByBobLogs: true
+        };
+        await saveKey(keyName);
+        
+        return keyName;
+    } catch (e) {
+        console.error(`[BOBLOGS] ❌ Erro ao criar key:`, e.message);
+        throw e;
+    }
+}
+
+async function bobLogsExtendKey(keyName, hours) {
+    try {
+        const channel = await clientLogs.channels.fetch(BOB_LOGS_PANEL_CHANNEL);
+        if (!channel) {
+            throw new Error("Canal do BobLogs não encontrado");
+        }
+        
+        // Comando para estender key no BobLogs (ajuste conforme os comandos do seu bot)
+        await channel.send(`!addtime ${keyName} ${hours}h`);
+        
+        console.log(`[BOBLOGS] ✅ Comando enviado para estender key: ${keyName} +${hours}h`);
+        
+        // Atualiza localmente também
+        if (keys[keyName]) {
+            keys[keyName].expiry += (hours * 3600 * 1000);
+            keys[keyName].warnSent = false;
+            await saveKey(keyName);
+        }
+        
+        return { success: true };
+    } catch (e) {
+        console.error(`[BOBLOGS] ❌ Erro ao estender key:`, e.message);
+        throw e;
+    }
+}
 
 const findKey    = (name) => Object.keys(keys).find(k => k.toLowerCase() === (name || "").trim().toLowerCase());
 const tsRelative = (date) => `<t:${Math.floor(new Date(date).getTime() / 1000)}:R>`;
@@ -516,33 +593,130 @@ async function opCleanLogs() {
 }
 
 async function confirmarPagamento(user, hours, channel, adminId, price, label, couponUsed) {
-    const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === user.id);
     let keyName;
-    if (keyEntry) {
-        keyName = keyEntry[0];
-        const d = keys[keyName];
-        if (d.paused) {
-            d.expiry = Date.now() + d.remaining + (hours * 3600 * 1000);
-            d.paused = false;
-        } else if (d.expiry === Infinity) {
-            // Lifetime key, no change needed
-        } else {
-            d.expiry += (hours * 3600 * 1000);
+    
+    if (BOBLOGS_ENABLED) {
+        // ─── MODO BOBLOGS (BOT DISCORD) ──────────────────────────────────────
+        console.log(`[PAYMENT] Processando pagamento via BobLogs para ${user.tag || user.discordTag}`);
+        
+        try {
+            // Verifica se o usuário já tem key localmente
+            const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === (user.id || user.discordId));
+            
+            if (keyEntry && keyEntry[0]) {
+                // Já tem key, apenas estende
+                keyName = keyEntry[0];
+                await bobLogsExtendKey(keyName, hours);
+                console.log(`[PAYMENT] Key estendida via BobLogs: ${keyName} +${hours}h`);
+            } else {
+                // Não tem key, cria uma nova
+                keyName = await bobLogsCreateKey(
+                    user.id || user.discordId,
+                    user.tag || user.discordTag,
+                    hours
+                );
+                console.log(`[PAYMENT] Key criada via BobLogs: ${keyName} (${hours}h)`);
+            }
+        } catch (e) {
+            console.error(`[PAYMENT] ❌ Erro no BobLogs:`, e.message);
+            // Fallback: cria localmente se o BobLogs falhar
+            keyName = generateBobKey();
+            keys[keyName] = {
+                expiry: Date.now() + (hours * 3600 * 1000),
+                paused: false,
+                remaining: 0,
+                hwid: null,
+                discordId: user.id || user.discordId,
+                warnSent: false,
+                isAutoKey: false,
+                managedByBobLogs: false
+            };
+            await saveKey(keyName);
+            console.warn(`[PAYMENT] Key criada localmente (fallback): ${keyName}`);
         }
-        d.warnSent = false;
-        await saveKey(keyName);
+        
     } else {
-        keyName = generateBobKey();
-        keys[keyName] = { expiry: Date.now() + (hours * 3600 * 1000), paused: false, remaining: 0, hwid: null, discordId: user.id, warnSent: false, isAutoKey: false };
-        await saveKey(keyName);
+        // ─── MODO LOCAL (SEM BOBLOGS) ────────────────────────────────────────
+        console.log(`[PAYMENT] Processando pagamento localmente para ${user.tag || user.discordTag}`);
+        
+        const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === (user.id || user.discordId));
+        
+        if (keyEntry) {
+            keyName = keyEntry[0];
+            const d = keys[keyName];
+            if (d.paused) {
+                d.expiry = Date.now() + d.remaining + (hours * 3600 * 1000);
+                d.paused = false;
+            } else if (d.expiry === Infinity) {
+                // Lifetime key, no change needed
+            } else {
+                d.expiry += (hours * 3600 * 1000);
+            }
+            d.warnSent = false;
+            await saveKey(keyName);
+        } else {
+            keyName = generateBobKey();
+            keys[keyName] = { 
+                expiry: Date.now() + (hours * 3600 * 1000), 
+                paused: false, 
+                remaining: 0, 
+                hwid: null, 
+                discordId: user.id || user.discordId, 
+                warnSent: false, 
+                isAutoKey: false,
+                managedByBobLogs: false
+            };
+            await saveKey(keyName);
+        }
     }
 
-    await SaleHistory.create({ discordId: user.id, discordTag: user.tag, hours, price, label, keyName, couponUsed, confirmedBy: adminId });
+    // Salva histórico de venda
+    await SaleHistory.create({ 
+        discordId: user.id || user.discordId, 
+        discordTag: user.tag || user.discordTag, 
+        hours, 
+        price, 
+        label, 
+        keyName, 
+        couponUsed, 
+        confirmedBy: adminId 
+    });
 
+    // Notifica no canal (se houver)
     if (channel) {
-        await channel.send(`✅ Pagamento de ${user.tag} confirmado por <@${adminId}>. Key \`${keyName}\` adicionada/atualizada com ${hours} horas.`);
+        await channel.send(`✅ Pagamento de ${user.tag || user.discordTag} confirmado por <@${adminId}>. Key \`${keyName}\` adicionada/atualizada com ${hours} horas.`);
     }
-    user.send(`✅ Seu pagamento de ${label} foi confirmado! Sua key é \`${keyName}\`.`).catch(() => {});
+    
+    // Envia DM para o usuário
+    const discordUser = await fetchUserFromAnyClient(user.id || user.discordId);
+    if (discordUser) {
+        const scriptExample = `getgenv().BobJoiner = {
+    ["Key"] = "${keyName}",
+    ["Discord ID"] = "${user.id || user.discordId}",
+}
+
+loadstring(game:HttpGet("https://raw.githubusercontent.com/mariazserker-art/BobAJ/refs/heads/main/BobAJ"))()`;
+
+        const embed = new EmbedBuilder()
+            .setColor(COLORS.success)
+            .setTitle("✅ Pagamento Confirmado!")
+            .setDescription(`Seu plano de **${label}** foi ativado com sucesso!`)
+            .addFields(
+                { name: "🔑 Sua Key", value: `\`${keyName}\``, inline: false },
+                { name: "⏱️ Duração", value: `${hours} hora${hours > 1 ? 's' : ''}`, inline: true },
+                { name: "💰 Valor", value: `R$ ${price.toFixed(2)}`, inline: true },
+                { name: "📜 Script Personalizado", value: `Copie e cole no executor:\n\`\`\`lua\n${scriptExample}\n\`\`\``, inline: false },
+                { name: "🌐 Ou acesse o site", value: `${FRONTEND_URL}`, inline: false }
+            )
+            .setFooter({ text: "Bob Joiner - Obrigado pela compra!" })
+            .setTimestamp();
+        
+        discordUser.send({ embeds: [embed] }).catch(() => {
+            console.warn(`[PAYMENT] Não foi possível enviar DM para ${user.tag || user.discordTag}`);
+        });
+    }
+    
+    return keyName;
 }
 
 setInterval(async () => {
@@ -638,8 +812,9 @@ async function requireAdminAuth(req, res, next) {
         } else {
             return res.status(403).json({ error: "Acesso negado. Requer privilégios de administrador ou secret válido." });
         }
+    } else {
+        return next(); // Se o usuário tem role de admin, permite acesso
     }
-    next();
 }
 
 // --- EXPRESS APP ---
@@ -669,6 +844,81 @@ app.get("/", (req, res) => {
         message: "Bob Joiner API",
         frontend: "https://bob-html-one.vercel.app"
     });
+});
+
+// Rota para gerar script personalizado para cada usuário (requer autenticação)
+app.get("/script/joiner", requireAuth, async (req, res) => {
+    try {
+        // Busca informações da key do usuário
+        const user = await User.findOne({ discordId: req.user.discordId });
+        if (!user) {
+            return res.status(404).send("-- Erro: Usuário não encontrado");
+        }
+        
+        let keyName = null;
+        let keyData = null;
+        
+        if (BOBLOGS_ENABLED) {
+            // Busca key no BobLogs
+            const bobLogsKey = await bobLogsGetUserKey(req.user.discordId);
+            if (bobLogsKey && bobLogsKey.keyName) {
+                keyName = bobLogsKey.keyName;
+                keyData = bobLogsKey;
+            }
+        } else {
+            // Fallback: busca key localmente
+            const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === req.user.discordId);
+            if (keyEntry) {
+                keyName = keyEntry[0];
+                keyData = keyEntry[1];
+            }
+        }
+        
+        if (!keyName) {
+            return res.status(404).send(`-- Erro: Você não possui uma key ativa
+-- Faça login no site e compre um plano: ${FRONTEND_URL}`);
+        }
+        
+        // Verifica se a key está ativa
+        if (keyData && keyData.status && keyData.status !== 'active') {
+            return res.status(403).send(`-- Erro: Sua key está ${keyData.status}
+-- Compre mais horas em: ${FRONTEND_URL}`);
+        }
+        
+        // Gera o script personalizado
+        const script = `-- Bob Joiner - Script Personalizado
+-- Usuário: ${user.discordTag}
+-- Key: ${keyName}
+
+getgenv().BobJoiner = {
+    ["Key"] = "${keyName}",
+    ["Discord ID"] = "${req.user.discordId}",
+}
+
+loadstring(game:HttpGet("https://raw.githubusercontent.com/mariazserker-art/BobAJ/refs/heads/main/BobAJ"))()`;
+        
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.send(script);
+        
+        console.log(`[SCRIPT] Script gerado para ${user.discordTag} (${keyName})`);
+        
+    } catch (e) {
+        console.error("[SCRIPT] Erro ao gerar script:", e.message);
+        res.status(500).send(`-- Erro ao gerar script: ${e.message}`);
+    }
+});
+
+// Rota pública para obter o loadstring (sem key personalizada)
+app.get("/script/loader", (req, res) => {
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.send(`-- Bob Joiner - Loader
+-- Para obter seu script personalizado, acesse: ${FRONTEND_URL}
+
+-- Você precisa fazer login no site para obter sua key
+print("⚠️ Acesse ${FRONTEND_URL} para obter seu script personalizado com sua key!")
+`);
 });
 
 // --- ROTAS DA API ---
@@ -874,21 +1124,93 @@ app.get("/api/online", (req, res) => {
 });
 
 app.post("/api/buy", requireAuth, async (req, res) => {
-    const { planValue } = req.body;
-    const plan = PLANS.find(p => p.value === planValue && p.active);
-    if (!plan) return res.status(400).json({ error: "Plano inválido" });
+    const { hours } = req.body; // Agora recebe horas diretamente
+    
+    if (!hours || isNaN(hours) || hours < 1) {
+        return res.status(400).json({ error: "Mínimo de 1 hora" });
+    }
+    
+    // Preço: R$5 por hora
+    const pricePerHour = 5;
+    const totalPrice = hours * pricePerHour;
+    
     const user = await User.findOne({ discordId: req.user.discordId });
     if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
-    if (user.balance < plan.price) return res.status(400).json({ error: "Saldo insuficiente" });
-    user.balance -= plan.price; await user.save();
-    await confirmarPagamento({ id: user.discordId, tag: user.discordTag }, plan.hours, null, "auto", plan.price, plan.label, null);
-    await Transaction.create({ discordId: user.discordId, type: "purchase", amount: -plan.price, description: `Compra: ${plan.label}` });
-    res.json({ ok: true, newBalance: user.balance, plan: plan.label });
+    if (user.balance < totalPrice) return res.status(400).json({ error: "Saldo insuficiente" });
+    
+    user.balance -= totalPrice;
+    await user.save();
+    
+    await confirmarPagamento(
+        { id: user.discordId, tag: user.discordTag }, 
+        hours, 
+        null, 
+        "auto", 
+        totalPrice, 
+        `${hours}h - Access all logs max: 100bd`, 
+        null
+    );
+    
+    await Transaction.create({ 
+        discordId: user.discordId, 
+        type: "purchase", 
+        amount: -totalPrice, 
+        description: `Compra: ${hours}h (R$${totalPrice})` 
+    });
+    
+    res.json({ ok: true, newBalance: user.balance, hours, price: totalPrice });
 });
 
 app.get("/api/transactions", requireAuth, async (req, res) => {
     const transactions = await Transaction.find({ discordId: req.user.discordId }).sort({ createdAt: -1 }).limit(20);
     res.json(transactions);
+});
+
+// Rota para obter informações da key do usuário
+app.get("/api/key/info", requireAuth, async (req, res) => {
+    try {
+        // Busca key localmente (tanto no modo BobLogs quanto local)
+        const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === req.user.discordId);
+        
+        if (!keyEntry) {
+            return res.json({ hasKey: false });
+        }
+        
+        const [keyName, keyData] = keyEntry;
+        const now = Date.now();
+        
+        let status = "inactive";
+        let timeLeft = 0;
+        let timeLeftFormatted = "Expirado";
+        
+        if (keyData.paused) {
+            status = "paused";
+            timeLeft = keyData.remaining;
+            timeLeftFormatted = formatTime(keyData.remaining);
+        } else if (keyData.expiry === Infinity) {
+            status = "lifetime";
+            timeLeft = Infinity;
+            timeLeftFormatted = "Lifetime ♾️";
+        } else if (keyData.expiry > now) {
+            status = "active";
+            timeLeft = keyData.expiry - now;
+            timeLeftFormatted = formatTime(timeLeft);
+        }
+        
+        return res.json({
+            hasKey: true,
+            keyName,
+            status,
+            timeLeft,
+            timeLeftFormatted,
+            hwid: keyData.hwid || null,
+            isAutoKey: keyData.isAutoKey || false,
+            managedByBobLogs: keyData.managedByBobLogs || false
+        });
+    } catch (e) {
+        console.error("[API] Erro ao buscar key:", e.message);
+        res.status(500).json({ error: "Erro ao buscar informações da key" });
+    }
 });
 
 // ─── RECARGA PIX MANUAL ───────────────────────────────────────────────────────
@@ -1343,7 +1665,165 @@ clientNotifier.on("messageCreate", async (message) => {
     pushBrainrot({ id: Date.now().toString(), brainrot: embed.title || "Bob!", name: embed.title || "Brainrot", jobId: xorObfuscate(jobId), value, players });
 });
 
-clientLogs.on("ready", async () => { console.log(`[LOGS] Online: ${clientLogs.user.tag}`); await sendLogsPanel(); });
+clientLogs.on("ready", async () => { console.log(`[LOGS] Online: ${clientLogs.user.tag}`); await sendLogsPanel(); startOdysseyPanel(); });
+
+// ─── PAINEL ESTILO ODYSSEY (AUTO-ATUALIZADO) ─────────────────────────────────
+let odysseyPanelMessage = null;
+const ODYSSEY_PANEL_CHANNEL = process.env.ODYSSEY_PANEL_CHANNEL || LOGS_CHANNEL_ID;
+const ODYSSEY_UPDATE_INTERVAL = 60 * 1000; // Atualiza a cada 1 minuto
+
+async function startOdysseyPanel() {
+    if (!ODYSSEY_PANEL_CHANNEL) {
+        console.warn("[ODYSSEY] Canal não configurado");
+        return;
+    }
+    
+    try {
+        const channel = await clientLogs.channels.fetch(ODYSSEY_PANEL_CHANNEL);
+        if (!channel) {
+            console.warn("[ODYSSEY] Canal não encontrado");
+            return;
+        }
+        
+        // Cria mensagem inicial
+        const embed = buildOdysseyEmbed();
+        odysseyPanelMessage = await channel.send({ embeds: [embed] });
+        console.log("[ODYSSEY] Painel criado e iniciado");
+        
+        // Atualiza periodicamente
+        setInterval(async () => {
+            try {
+                const embed = buildOdysseyEmbed();
+                if (odysseyPanelMessage) {
+                    await odysseyPanelMessage.edit({ embeds: [embed] });
+                }
+            } catch (e) {
+                console.error("[ODYSSEY] Erro ao atualizar painel:", e.message);
+            }
+        }, ODYSSEY_UPDATE_INTERVAL);
+        
+    } catch (e) {
+        console.error("[ODYSSEY] Erro ao iniciar painel:", e.message);
+    }
+}
+
+function buildOdysseyEmbed() {
+    const now = Date.now();
+    
+    // Conta usuários online
+    const onlineUsers = Object.entries(presence).filter(([, p]) => {
+        return now - p.lastSeen < ONLINE_STALE_MS;
+    });
+    
+    // Pega keys ativas
+    const activeKeys = Object.entries(keys).filter(([, d]) => {
+        if (d.paused) return false;
+        if (d.expiry === Infinity) return true;
+        return d.expiry > now;
+    });
+    
+    // Calcula slots usados
+    const usedSlots = onlineUsers.length;
+    const maxSlots = MAX_SLOTS;
+    
+    const embed = new EmbedBuilder()
+        .setColor(COLORS.primary)
+        .setTitle("📊 Slots Status")
+        .setTimestamp()
+        .setFooter({ text: `Updates every minute | discord.gg/bobnotifier` });
+    
+    let description = `**Bob Notifier (R$5/hora) — ${usedSlots}/${maxSlots}**\n\n`;
+    
+    if (onlineUsers.length === 0) {
+        description += "• *Nenhum usuário online no momento*\n";
+    } else {
+        onlineUsers.forEach(([keyName, presenceData]) => {
+            const keyData = keys[keyName];
+            if (!keyData) return;
+            
+            const timeLeft = keyData.expiry === Infinity 
+                ? "♾️" 
+                : formatTime(keyData.expiry - now);
+            
+            const userMention = keyData.discordId ? `<@${keyData.discordId}>` : keyName;
+            
+            // Calcula tempo até expirar em formato legível
+            let expiresText = "expires em ";
+            if (keyData.expiry === Infinity) {
+                expiresText += "nunca";
+            } else {
+                const timeLeftMs = keyData.expiry - now;
+                const days = Math.floor(timeLeftMs / (24 * 3600 * 1000));
+                const hours = Math.floor((timeLeftMs % (24 * 3600 * 1000)) / (3600 * 1000));
+                const minutes = Math.floor((timeLeftMs % (3600 * 1000)) / (60 * 1000));
+                
+                if (days > 0) expiresText += `${days}d ${hours}h ${minutes}m`;
+                else if (hours > 0) expiresText += `${hours}h ${minutes}m`;
+                else expiresText += `${minutes} minutos`;
+            }
+            
+            description += `• ${userMention} - ${expiresText}\n`;
+        });
+    }
+    
+    embed.setDescription(description);
+    
+    return embed;
+}
+
+// ─── COMANDO !ONLINE ──────────────────────────────────────────────────────────
+clientLogs.on(Events.MessageCreate, async (message) => {
+    if (message.author.bot) return;
+    if (!message.content.startsWith("!")) return;
+    
+    const args = message.content.slice(1).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+    
+    if (command === "online") {
+        try {
+            const now = Date.now();
+            const activeKeys = Object.entries(keys).filter(([, d]) => {
+                if (d.paused) return false;
+                if (d.expiry === Infinity) return true;
+                return d.expiry > now;
+            });
+            
+            const onlineCount = Object.keys(presence).filter(k => {
+                const p = presence[k];
+                return now - p.lastSeen < ONLINE_STALE_MS;
+            }).length;
+            
+            const embed = new EmbedBuilder()
+                .setColor(COLORS.primary)
+                .setTitle(`📋 Keys — ${activeKeys.length} | 🟢 ${onlineCount} online`)
+                .setTimestamp();
+            
+            let description = "";
+            
+            activeKeys.forEach(([keyName, keyData]) => {
+                const timeLeft = keyData.expiry === Infinity 
+                    ? "♾️" 
+                    : formatTime(keyData.expiry - now);
+                
+                const userMention = keyData.discordId ? `<@${keyData.discordId}>` : keyName;
+                const isOnline = presence[keyName.toLowerCase()] && (now - presence[keyName.toLowerCase()].lastSeen < ONLINE_STALE_MS);
+                
+                description += `${isOnline ? "🟢" : "✅"} ${userMention} **(—)** — ${timeLeft}\n`;
+            });
+            
+            if (description) {
+                embed.setDescription(description);
+            } else {
+                embed.setDescription("Nenhuma key ativa no momento.");
+            }
+            
+            await message.channel.send({ embeds: [embed] });
+        } catch (e) {
+            console.error("[ONLINE] Erro ao processar comando:", e.message);
+            await message.channel.send("❌ Erro ao processar comando !online");
+        }
+    }
+});
 
 function buildLogsEmbed() { return new EmbedBuilder().setTitle("⚙️ Bob Joiner — Painel Administrativo").setColor(COLORS.primary).setDescription("Gerencie keys, pagamentos, cupons e planos.").setTimestamp(); }
 function buildLogsRows() {

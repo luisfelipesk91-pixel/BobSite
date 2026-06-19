@@ -695,7 +695,7 @@ async function confirmarPagamento(user, hours, channel, adminId, price, label, c
     ["Discord ID"] = "${user.id || user.discordId}",
 }
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/mariazserker-art/BobAJ/refs/heads/main/BobAJ"))()`;
+loadstring(game:HttpGet("https://raw.githubusercontent.com/luisfelipesk91-pixel/bobaj/refs/heads/main/Bob_Joiner"))()`;
 
         const embed = new EmbedBuilder()
             .setColor(COLORS.success)
@@ -895,7 +895,7 @@ getgenv().BobJoiner = {
     ["Discord ID"] = "${req.user.discordId}",
 }
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/mariazserker-art/BobAJ/refs/heads/main/BobAJ"))()`;
+loadstring(game:HttpGet("https://raw.githubusercontent.com/luisfelipesk91-pixel/bobaj/refs/heads/main/Bob_Joiner"))()`;
         
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.setHeader("Access-Control-Allow-Origin", "*");
@@ -1130,8 +1130,8 @@ app.post("/api/buy", requireAuth, async (req, res) => {
         return res.status(400).json({ error: "Mínimo de 1 hora" });
     }
     
-    // Preço: R$5 por hora
-    const pricePerHour = 5;
+    // Preço: R$2,50 por hora
+    const pricePerHour = 2.50;
     const totalPrice = hours * pricePerHour;
     
     const user = await User.findOne({ discordId: req.user.discordId });
@@ -1732,7 +1732,7 @@ function buildOdysseyEmbed() {
         .setTimestamp()
         .setFooter({ text: `Updates every minute | discord.gg/bobnotifier` });
     
-    let description = `**Bob Notifier (R$5/hora) — ${usedSlots}/${maxSlots}**\n\n`;
+    let description = `**Bob Notifier (R$2,50/hora) — ${usedSlots}/${maxSlots}**\n\n`;
     
     if (onlineUsers.length === 0) {
         description += "• *Nenhum usuário online no momento*\n";

@@ -93,7 +93,7 @@ const MIN_RECHARGE = parseInt(process.env.MIN_RECHARGE || "5");
 
 // ─── SISTEMA DE CARGO BUYER ──────────────────────────────────────────────────
 const BUYER_ROLE_ID = process.env.BUYER_ROLE_ID || "1502103327595434115";
-const GUILD_ID = process.env.GUILD_ID || "1477885791420510229"; // ID do servidor Discord (fallback)
+const GUILD_ID = process.env.GUILD_ID || "1477872742933069846"; // ID do servidor Discord (correto)
 
 console.log("[CONFIG] BUYER_ROLE_ID:", BUYER_ROLE_ID);
 console.log("[CONFIG] GUILD_ID:", GUILD_ID);
@@ -613,28 +613,47 @@ async function addBuyerRole(discordId) {
     }
     
     try {
+        console.log(`[BUYER ROLE] Tentando adicionar cargo para: ${discordId}`);
+        console.log(`[BUYER ROLE] GUILD_ID configurado: ${GUILD_ID}`);
+        console.log(`[BUYER ROLE] Servidores disponíveis:`, clientLogs.guilds.cache.map(g => `${g.name} (${g.id})`).join(", "));
+        
         // Tenta buscar o servidor usando clientLogs (tem GuildMembers intent)
-        const guild = await clientLogs.guilds.fetch(GUILD_ID);
+        const guild = await clientLogs.guilds.fetch(GUILD_ID).catch(e => {
+            console.error(`[BUYER ROLE] Erro ao buscar servidor ${GUILD_ID}:`, e.message);
+            return null;
+        });
+        
         if (!guild) {
-            console.error("[BUYER ROLE] Servidor não encontrado:", GUILD_ID);
+            console.error("[BUYER ROLE] ❌ Servidor não encontrado:", GUILD_ID);
+            console.error("[BUYER ROLE] ❌ O bot BobLogs precisa estar no servidor!");
+            console.error("[BUYER ROLE] ❌ Servidores onde o bot está:", clientLogs.guilds.cache.map(g => `${g.name} (${g.id})`).join(", "));
             return;
         }
         
-        const member = await guild.members.fetch(discordId);
+        console.log(`[BUYER ROLE] ✓ Servidor encontrado: ${guild.name}`);
+        
+        const member = await guild.members.fetch(discordId).catch(e => {
+            console.error(`[BUYER ROLE] Erro ao buscar membro ${discordId}:`, e.message);
+            return null;
+        });
+        
         if (!member) {
-            console.error("[BUYER ROLE] Membro não encontrado:", discordId);
+            console.error("[BUYER ROLE] ❌ Membro não encontrado no servidor:", discordId);
             return;
         }
+        
+        console.log(`[BUYER ROLE] ✓ Membro encontrado: ${member.user.tag}`);
         
         // Adiciona o cargo se não tiver
         if (!member.roles.cache.has(BUYER_ROLE_ID)) {
             await member.roles.add(BUYER_ROLE_ID);
             console.log(`[BUYER ROLE] ✅ Cargo adicionado para ${member.user.tag} (${discordId})`);
         } else {
-            console.log(`[BUYER ROLE] Usuário ${member.user.tag} já possui o cargo`);
+            console.log(`[BUYER ROLE] ℹ️ Usuário ${member.user.tag} já possui o cargo`);
         }
     } catch (e) {
         console.error(`[BUYER ROLE] ❌ Erro ao adicionar cargo:`, e.message);
+        console.error(`[BUYER ROLE] Stack trace:`, e.stack);
     }
 }
 
@@ -1942,7 +1961,23 @@ clientNotifier.on("messageCreate", async (message) => {
     pushBrainrot({ id: Date.now().toString(), brainrot: embed.title || "Bob!", name: embed.title || "Brainrot", jobId: xorObfuscate(jobId), value, players });
 });
 
-clientLogs.on("ready", async () => { console.log(`[LOGS] Online: ${clientLogs.user.tag}`); await sendLogsPanel(); startOdysseyPanel(); });
+clientLogs.on("ready", async () => { 
+    console.log(`[LOGS] ✅ Online: ${clientLogs.user.tag}`); 
+    console.log(`[LOGS] Servidores onde estou:`, clientLogs.guilds.cache.map(g => `${g.name} (${g.id})`).join(", "));
+    console.log(`[LOGS] GUILD_ID configurado para cargo Buyer: ${GUILD_ID}`);
+    
+    // Verifica se está no servidor configurado
+    const targetGuild = clientLogs.guilds.cache.get(GUILD_ID);
+    if (targetGuild) {
+        console.log(`[LOGS] ✅ Bot está no servidor: ${targetGuild.name}`);
+    } else {
+        console.error(`[LOGS] ❌ Bot NÃO está no servidor ${GUILD_ID}!`);
+        console.error(`[LOGS] ❌ Adicione o bot ao servidor para o sistema de cargo funcionar!`);
+    }
+    
+    await sendLogsPanel(); 
+    startOdysseyPanel(); 
+});
 
 // ─── PAINEL ESTILO ODYSSEY (AUTO-ATUALIZADO) ─────────────────────────────────
 let odysseyPanelMessage = null;

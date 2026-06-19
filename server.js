@@ -1462,6 +1462,34 @@ app.get("/api/top-deposits", async (req, res) => {
     }
 });
 
+// Rota ADMIN para remover depósitos de um usuário específico do Top Deposits
+app.delete("/api/admin/remove-deposits/:discordId", requireAdminAuth, async (req, res) => {
+    try {
+        const { discordId } = req.params;
+        
+        if (!discordId) {
+            return res.status(400).json({ error: "Discord ID não fornecido" });
+        }
+        
+        // Remove todas as transações de depósito desse usuário
+        const result = await Transaction.deleteMany({ 
+            discordId: discordId, 
+            type: "deposit" 
+        });
+        
+        console.log(`[ADMIN] Removidos ${result.deletedCount} depósitos de ${discordId}`);
+        
+        res.json({ 
+            ok: true, 
+            message: `${result.deletedCount} depósito(s) removido(s) com sucesso`,
+            deletedCount: result.deletedCount
+        });
+    } catch (e) {
+        console.error("[ADMIN] Erro ao remover depósitos:", e.message);
+        res.status(500).json({ error: "Erro ao remover depósitos" });
+    }
+});
+
 // Rota para obter informações da key do usuário
 app.get("/api/key/info", requireAuth, async (req, res) => {
     try {

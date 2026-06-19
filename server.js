@@ -600,13 +600,27 @@ async function confirmarPagamento(user, hours, channel, adminId, price, label, c
         console.log(`[PAYMENT] Processando pagamento via BobLogs para ${user.tag || user.discordTag}`);
         
         try {
-            // Verifica se o usuário já tem key localmente
+            // Verifica se o usuário já tem key localmente (IMPORTANTE!)
             const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === (user.id || user.discordId));
             
             if (keyEntry && keyEntry[0]) {
                 // Já tem key, apenas estende
                 keyName = keyEntry[0];
                 await bobLogsExtendKey(keyName, hours);
+                
+                // Atualiza localmente também
+                const d = keys[keyName];
+                if (d.paused) {
+                    d.expiry = Date.now() + d.remaining + (hours * 3600 * 1000);
+                    d.paused = false;
+                } else if (d.expiry === Infinity) {
+                    // Lifetime key, no change needed
+                } else {
+                    d.expiry += (hours * 3600 * 1000);
+                }
+                d.warnSent = false;
+                await saveKey(keyName);
+                
                 console.log(`[PAYMENT] Key estendida via BobLogs: ${keyName} +${hours}h`);
             } else {
                 // Não tem key, cria uma nova
@@ -619,20 +633,38 @@ async function confirmarPagamento(user, hours, channel, adminId, price, label, c
             }
         } catch (e) {
             console.error(`[PAYMENT] ❌ Erro no BobLogs:`, e.message);
-            // Fallback: cria localmente se o BobLogs falhar
-            keyName = generateBobKey();
-            keys[keyName] = {
-                expiry: Date.now() + (hours * 3600 * 1000),
-                paused: false,
-                remaining: 0,
-                hwid: null,
-                discordId: user.id || user.discordId,
-                warnSent: false,
-                isAutoKey: false,
-                managedByBobLogs: false
-            };
-            await saveKey(keyName);
-            console.warn(`[PAYMENT] Key criada localmente (fallback): ${keyName}`);
+            // Fallback: verifica localmente e estende ou cria
+            const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === (user.id || user.discordId));
+            
+            if (keyEntry) {
+                keyName = keyEntry[0];
+                const d = keys[keyName];
+                if (d.paused) {
+                    d.expiry = Date.now() + d.remaining + (hours * 3600 * 1000);
+                    d.paused = false;
+                } else if (d.expiry === Infinity) {
+                    // Lifetime key, no change needed
+                } else {
+                    d.expiry += (hours * 3600 * 1000);
+                }
+                d.warnSent = false;
+                await saveKey(keyName);
+                console.log(`[PAYMENT] Key estendida localmente (fallback): ${keyName}`);
+            } else {
+                keyName = generateBobKey();
+                keys[keyName] = {
+                    expiry: Date.now() + (hours * 3600 * 1000),
+                    paused: false,
+                    remaining: 0,
+                    hwid: null,
+                    discordId: user.id || user.discordId,
+                    warnSent: false,
+                    isAutoKey: false,
+                    managedByBobLogs: false
+                };
+                await saveKey(keyName);
+                console.warn(`[PAYMENT] Key criada localmente (fallback): ${keyName}`);
+            }
         }
         
     } else {
@@ -1100,27 +1132,62 @@ app.get("/auth/me", requireAuth, async (req, res) => {
     res.json({ discordId: user.discordId, discordTag: user.discordTag, avatar: user.avatar, balance: user.balance, key: keyData, plans: PLANS.filter(p => p.active) });
 });
 
-app.get("/api/online", (req, res) => {
-    const now = Date.now();
-    const onlineByKey = {};
-    for (const [, info] of Object.entries(presence)) {
-        if (now - info.lastSeen > ONLINE_STALE_MS) continue;
-        const keyName = info.key ? findKey(info.key) : null;
-        if (keyName && !onlineByKey[keyName]) onlineByKey[keyName] = { name: info.name || "Unknown" };
-    }
-    const onlineUsers = [];
-    for (const [keyName, info] of Object.entries(onlineByKey)) {
-        const d = keys[keyName];
-        if (!d) continue;
-        onlineUsers.push({
-            keyPrefix: keyName.substring(0, 7) + "***",
-            robloxName: info.name,
-            expiryMs: d.expiry === Infinity ? null : d.expiry - now,
-            isLifetime: d.expiry === Infinity,
-            paused: d.paused,
+app.get("/api/online", async (req, res) => {
+    try {
+        const now = Date.now();
+        
+        // Pega TODAS as keys ativas (independente de estar online)
+        const activeKeys = [];
+        
+        for (const [keyName, keyData] of Object.entries(keys)) {
+            // Ignora keys pausadas ou expiradas
+            if (keyData.paused) continue;
+            if (keyData.expiry !== Infinity && keyData.expiry <= now) continue;
+            
+            // Busca informações do Discord do usuário
+            let discordUser = null;
+            let avatar = null;
+            let username = "Usuário";
+            
+            if (keyData.discordId) {
+                try {
+                    discordUser = await fetchUserFromAnyClient(keyData.discordId);
+                    if (discordUser) {
+                        username = discordUser.username || discordUser.tag || `User#${keyData.discordId}`;
+                        avatar = discordUser.displayAvatarURL({ size: 64 });
+                    }
+                } catch (e) {
+                    console.error(`[API] Erro ao buscar usuário Discord ${keyData.discordId}:`, e.message);
+                }
+            }
+            
+            activeKeys.push({
+                keyPrefix: keyName.substring(0, 7) + "***",
+                discordUsername: username,
+                discordAvatar: avatar,
+                discordId: keyData.discordId,
+                expiryMs: keyData.expiry === Infinity ? null : keyData.expiry - now,
+                isLifetime: keyData.expiry === Infinity,
+                paused: keyData.paused,
+            });
+        }
+        
+        // Conta quantos estão realmente online (executando script)
+        const onlineCount = Object.values(presence).filter(p => now - p.lastSeen < ONLINE_STALE_MS).length;
+        
+        res.json({ 
+            online: activeKeys, 
+            count: activeKeys.length, 
+            onlineNow: onlineCount,
+            maxSlots: MAX_SLOTS, 
+            slotsUsed: onlineCount, 
+            slotsAvailable: Math.max(0, MAX_SLOTS - onlineCount), 
+            serverTime: now 
         });
+    } catch (e) {
+        console.error("[API] Erro em /api/online:", e.message);
+        res.status(500).json({ error: "Erro ao buscar usuários online" });
     }
-    res.json({ online: onlineUsers, count: onlineUsers.length, maxSlots: MAX_SLOTS, slotsUsed: onlineUsers.length, slotsAvailable: Math.max(0, MAX_SLOTS - onlineUsers.length), serverTime: now });
 });
 
 app.post("/api/buy", requireAuth, async (req, res) => {
@@ -1147,7 +1214,7 @@ app.post("/api/buy", requireAuth, async (req, res) => {
         null, 
         "auto", 
         totalPrice, 
-        `${hours}h - Access all logs max: 100bd`, 
+        `${hours}h - Access all logs max: 100b`, 
         null
     );
     
@@ -1164,6 +1231,56 @@ app.post("/api/buy", requireAuth, async (req, res) => {
 app.get("/api/transactions", requireAuth, async (req, res) => {
     const transactions = await Transaction.find({ discordId: req.user.discordId }).sort({ createdAt: -1 }).limit(20);
     res.json(transactions);
+});
+
+// Rota para Top Deposits (ranking dos maiores depositantes)
+app.get("/api/top-deposits", async (req, res) => {
+    try {
+        // Agrupa transações de depósito por usuário e soma o total
+        const topDeposits = await Transaction.aggregate([
+            { $match: { type: "deposit", amount: { $gt: 0 } } },
+            { $group: {
+                _id: "$discordId",
+                totalDeposited: { $sum: "$amount" },
+                depositCount: { $sum: 1 }
+            }},
+            { $sort: { totalDeposited: -1 } },
+            { $limit: 10 }
+        ]);
+        
+        // Busca informações do Discord de cada usuário
+        const enrichedDeposits = await Promise.all(topDeposits.map(async (deposit) => {
+            const user = await User.findOne({ discordId: deposit._id });
+            let discordUser = null;
+            let avatar = null;
+            let username = "Usuário";
+            
+            if (deposit._id) {
+                try {
+                    discordUser = await fetchUserFromAnyClient(deposit._id);
+                    if (discordUser) {
+                        username = discordUser.username || discordUser.tag || `User#${deposit._id}`;
+                        avatar = discordUser.displayAvatarURL({ size: 128 });
+                    }
+                } catch (e) {
+                    console.error(`[TOP DEPOSITS] Erro ao buscar usuário ${deposit._id}:`, e.message);
+                }
+            }
+            
+            return {
+                discordId: deposit._id,
+                discordUsername: username,
+                discordAvatar: avatar,
+                totalDeposited: deposit.totalDeposited,
+                depositCount: deposit.depositCount
+            };
+        }));
+        
+        res.json(enrichedDeposits);
+    } catch (e) {
+        console.error("[API] Erro em /api/top-deposits:", e.message);
+        res.status(500).json({ error: "Erro ao buscar top deposits" });
+    }
 });
 
 // Rota para obter informações da key do usuário

@@ -1670,7 +1670,7 @@ clientLogs.on("ready", async () => { console.log(`[LOGS] Online: ${clientLogs.us
 // ─── PAINEL ESTILO ODYSSEY (AUTO-ATUALIZADO) ─────────────────────────────────
 let odysseyPanelMessage = null;
 const ODYSSEY_PANEL_CHANNEL = process.env.ODYSSEY_PANEL_CHANNEL || LOGS_CHANNEL_ID;
-const ODYSSEY_UPDATE_INTERVAL = 60 * 1000; // Atualiza a cada 1 minuto
+const ODYSSEY_UPDATE_INTERVAL = 30 * 1000; // Atualiza a cada 30 segundos
 
 async function startOdysseyPanel() {
     if (!ODYSSEY_PANEL_CHANNEL) {
@@ -1710,19 +1710,19 @@ async function startOdysseyPanel() {
 function buildOdysseyEmbed() {
     const now = Date.now();
     
-    // Conta usuários online
-    const onlineUsers = Object.entries(presence).filter(([, p]) => {
-        return now - p.lastSeen < ONLINE_STALE_MS;
-    });
-    
-    // Pega keys ativas
+    // Pega TODAS as keys ativas (independente de estar online ou não)
     const activeKeys = Object.entries(keys).filter(([, d]) => {
         if (d.paused) return false;
         if (d.expiry === Infinity) return true;
         return d.expiry > now;
     });
     
-    // Calcula slots usados
+    // Conta apenas usuários ONLINE
+    const onlineUsers = Object.entries(presence).filter(([, p]) => {
+        return now - p.lastSeen < ONLINE_STALE_MS;
+    });
+    
+    // Calcula slots usados (online)
     const usedSlots = onlineUsers.length;
     const maxSlots = MAX_SLOTS;
     
@@ -1730,27 +1730,27 @@ function buildOdysseyEmbed() {
         .setColor(COLORS.primary)
         .setTitle("📊 Slots Status")
         .setTimestamp()
-        .setFooter({ text: `Updates every minute | discord.gg/bobnotifier` });
+        .setFooter({ text: `Updates every 30 seconds | discord.gg/kHSC6xD2dz` });
     
     let description = `**Bob Notifier (R$2,50/hora) — ${usedSlots}/${maxSlots}**\n\n`;
     
-    if (onlineUsers.length === 0) {
-        description += "• *Nenhum usuário online no momento*\n";
+    if (activeKeys.length === 0) {
+        description += "• *Nenhuma key ativa no momento*\n";
     } else {
-        onlineUsers.forEach(([keyName, presenceData]) => {
-            const keyData = keys[keyName];
-            if (!keyData) return;
-            
+        activeKeys.forEach(([keyName, keyData]) => {
             const timeLeft = keyData.expiry === Infinity 
                 ? "♾️" 
                 : formatTime(keyData.expiry - now);
             
             const userMention = keyData.discordId ? `<@${keyData.discordId}>` : keyName;
             
+            // Verifica se está online
+            const isOnline = presence[keyName.toLowerCase()] && (now - presence[keyName.toLowerCase()].lastSeen < ONLINE_STALE_MS);
+            
             // Calcula tempo até expirar em formato legível
             let expiresText = "expires em ";
             if (keyData.expiry === Infinity) {
-                expiresText += "nunca";
+                expiresText = "nunca expira";
             } else {
                 const timeLeftMs = keyData.expiry - now;
                 const days = Math.floor(timeLeftMs / (24 * 3600 * 1000));
@@ -1762,7 +1762,10 @@ function buildOdysseyEmbed() {
                 else expiresText += `${minutes} minutos`;
             }
             
-            description += `• ${userMention} - ${expiresText}\n`;
+            // Adiciona indicador visual se está online
+            const onlineIndicator = isOnline ? "🟢 " : "";
+            
+            description += `• ${onlineIndicator}${userMention} - ${expiresText}\n`;
         });
     }
     

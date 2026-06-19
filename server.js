@@ -1855,28 +1855,42 @@ function buildOdysseyEmbed() {
         description += "• *Nenhuma key ativa no momento*\n";
     } else {
         activeKeys.forEach(([keyName, keyData]) => {
-            const timeLeft = keyData.expiry === Infinity 
-                ? "♾️" 
-                : formatTime(keyData.expiry - now);
-            
             const userMention = keyData.discordId ? `<@${keyData.discordId}>` : keyName;
             
             // Verifica se está online
             const isOnline = presence[keyName.toLowerCase()] && (now - presence[keyName.toLowerCase()].lastSeen < ONLINE_STALE_MS);
             
-            // Calcula tempo até expirar em formato legível
-            let expiresText = "expires em ";
+            // Calcula tempo até expirar no formato "expires em X"
+            let expiresText = "";
             if (keyData.expiry === Infinity) {
                 expiresText = "nunca expira";
             } else {
                 const timeLeftMs = keyData.expiry - now;
-                const days = Math.floor(timeLeftMs / (24 * 3600 * 1000));
-                const hours = Math.floor((timeLeftMs % (24 * 3600 * 1000)) / (3600 * 1000));
-                const minutes = Math.floor((timeLeftMs % (3600 * 1000)) / (60 * 1000));
                 
-                if (days > 0) expiresText += `${days}d ${hours}h ${minutes}m`;
-                else if (hours > 0) expiresText += `${hours}h ${minutes}m`;
-                else expiresText += `${minutes} minutos`;
+                if (timeLeftMs < 0) {
+                    // Expirado (não deveria aparecer, mas por segurança)
+                    const secPassed = Math.abs(Math.floor(timeLeftMs / 1000));
+                    expiresText = `expirou há ${secPassed} segundo${secPassed !== 1 ? 's' : ''}`;
+                } else if (timeLeftMs < 60 * 1000) {
+                    // Menos de 1 minuto = mostrar segundos
+                    const sec = Math.floor(timeLeftMs / 1000);
+                    expiresText = `expires em ${sec} segundo${sec !== 1 ? 's' : ''}`;
+                } else if (timeLeftMs < 60 * 60 * 1000) {
+                    // Menos de 1 hora = mostrar minutos
+                    const min = Math.floor(timeLeftMs / (60 * 1000));
+                    expiresText = `expires em ${min} minuto${min !== 1 ? 's' : ''}`;
+                } else if (timeLeftMs < 24 * 60 * 60 * 1000) {
+                    // Menos de 1 dia = mostrar horas e minutos
+                    const hours = Math.floor(timeLeftMs / (60 * 60 * 1000));
+                    const mins = Math.floor((timeLeftMs % (60 * 60 * 1000)) / (60 * 1000));
+                    expiresText = `expires em ${hours}h ${mins}m`;
+                } else {
+                    // Mais de 1 dia = mostrar dias, horas e minutos
+                    const days = Math.floor(timeLeftMs / (24 * 60 * 60 * 1000));
+                    const hours = Math.floor((timeLeftMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+                    const mins = Math.floor((timeLeftMs % (60 * 60 * 1000)) / (60 * 1000));
+                    expiresText = `expires em ${days}d ${hours}h ${mins}m`;
+                }
             }
             
             // Adiciona indicador visual se está online

@@ -91,6 +91,13 @@ const ADMIN_ROLE_IDS = process.env.ADMIN_ROLE_IDS ? process.env.ADMIN_ROLE_IDS.s
 const RECHARGE_CHANNEL = process.env.RECHARGE_CHANNEL || "1511517095412895905";
 const MIN_RECHARGE = parseInt(process.env.MIN_RECHARGE || "5");
 
+// ─── SISTEMA DE CARGO BUYER ──────────────────────────────────────────────────
+const BUYER_ROLE_ID = process.env.BUYER_ROLE_ID || "1502103327595434115";
+const GUILD_ID = process.env.GUILD_ID || "1477885791420510229"; // ID do servidor Discord (fallback)
+
+console.log("[CONFIG] BUYER_ROLE_ID:", BUYER_ROLE_ID);
+console.log("[CONFIG] GUILD_ID:", GUILD_ID);
+
 // --- INITIALIZE DISCORD CLIENTS FIRST ---
 const clientNotifier = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildWebhooks] });
 const clientLogs     = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages, GatewayIntentBits.GuildMembers], partials: [Partials.Channel, Partials.Message] });
@@ -592,6 +599,82 @@ async function opCleanLogs() {
     return { ok: true, msg: "✅ Logs de brainrots limpos!" };
 }
 
+// ─── FUNÇÕES DE GERENCIAMENTO DE CARGO BUYER ────────────────────────────────
+async function addBuyerRole(discordId) {
+    if (!GUILD_ID) {
+        console.warn("[BUYER ROLE] GUILD_ID não configurado, ignorando");
+        return;
+    }
+    
+    // Verifica se o bot está pronto
+    if (!clientLogs.isReady()) {
+        console.warn("[BUYER ROLE] clientLogs não está pronto ainda, ignorando");
+        return;
+    }
+    
+    try {
+        // Tenta buscar o servidor usando clientLogs (tem GuildMembers intent)
+        const guild = await clientLogs.guilds.fetch(GUILD_ID);
+        if (!guild) {
+            console.error("[BUYER ROLE] Servidor não encontrado:", GUILD_ID);
+            return;
+        }
+        
+        const member = await guild.members.fetch(discordId);
+        if (!member) {
+            console.error("[BUYER ROLE] Membro não encontrado:", discordId);
+            return;
+        }
+        
+        // Adiciona o cargo se não tiver
+        if (!member.roles.cache.has(BUYER_ROLE_ID)) {
+            await member.roles.add(BUYER_ROLE_ID);
+            console.log(`[BUYER ROLE] ✅ Cargo adicionado para ${member.user.tag} (${discordId})`);
+        } else {
+            console.log(`[BUYER ROLE] Usuário ${member.user.tag} já possui o cargo`);
+        }
+    } catch (e) {
+        console.error(`[BUYER ROLE] ❌ Erro ao adicionar cargo:`, e.message);
+    }
+}
+
+async function removeBuyerRole(discordId) {
+    if (!GUILD_ID) {
+        console.warn("[BUYER ROLE] GUILD_ID não configurado, ignorando");
+        return;
+    }
+    
+    // Verifica se o bot está pronto
+    if (!clientLogs.isReady()) {
+        console.warn("[BUYER ROLE] clientLogs não está pronto ainda, ignorando");
+        return;
+    }
+    
+    try {
+        const guild = await clientLogs.guilds.fetch(GUILD_ID);
+        if (!guild) {
+            console.error("[BUYER ROLE] Servidor não encontrado:", GUILD_ID);
+            return;
+        }
+        
+        const member = await guild.members.fetch(discordId);
+        if (!member) {
+            console.error("[BUYER ROLE] Membro não encontrado:", discordId);
+            return;
+        }
+        
+        // Remove o cargo se tiver
+        if (member.roles.cache.has(BUYER_ROLE_ID)) {
+            await member.roles.remove(BUYER_ROLE_ID);
+            console.log(`[BUYER ROLE] ✅ Cargo removido de ${member.user.tag} (${discordId})`);
+        } else {
+            console.log(`[BUYER ROLE] Usuário ${member.user.tag} não possui o cargo`);
+        }
+    } catch (e) {
+        console.error(`[BUYER ROLE] ❌ Erro ao remover cargo:`, e.message);
+    }
+}
+
 async function confirmarPagamento(user, hours, channel, adminId, price, label, couponUsed) {
     let keyName;
     
@@ -748,6 +831,9 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/luisfelipesk91-pixel/
         });
     }
     
+    // ─── ADICIONA CARGO BUYER AUTOMATICAMENTE ────────────────────────────────
+    await addBuyerRole(user.id || user.discordId);
+    
     return keyName;
 }
 
@@ -756,9 +842,16 @@ setInterval(async () => {
     for (const [name, data] of Object.entries(keys)) {
         if (data.isAutoKey && data.expiry === 0 && data.paused) continue;
         if (data.expiry !== Infinity && !data.paused && data.expiry - now <= 0) {
-            if (data.discordId) fetchUserFromAnyClient(data.discordId).then(user => {
-                if (user) user.send(`⚠️ Sua key \`${name}\` expirou!`).catch(() => {});
-            });
+            // Key expirou
+            if (data.discordId) {
+                fetchUserFromAnyClient(data.discordId).then(user => {
+                    if (user) user.send(`⚠️ Sua key \`${name}\` expirou!`).catch(() => {});
+                });
+                
+                // ─── REMOVE CARGO BUYER AUTOMATICAMENTE ──────────────────────────
+                await removeBuyerRole(data.discordId);
+            }
+            
             await KeyModel.deleteOne({ name });
             delete keys[name];
             console.log(`[KEY] Key ${name} expirada e removida.`);
@@ -1234,6 +1327,70 @@ app.post("/api/buy", requireAuth, async (req, res) => {
 app.get("/api/transactions", requireAuth, async (req, res) => {
     const transactions = await Transaction.find({ discordId: req.user.discordId }).sort({ createdAt: -1 }).limit(20);
     res.json(transactions);
+});
+
+// Rota para resetar HWID da key do usuário
+app.post("/api/reset-hwid", requireAuth, async (req, res) => {
+    try {
+        const discordId = req.user.discordId;
+        
+        // Busca a key do usuário
+        const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === discordId);
+        
+        if (!keyEntry) {
+            return res.status(404).json({ error: "Você não possui uma key ativa" });
+        }
+        
+        const keyName = keyEntry[0];
+        
+        // Reseta o HWID
+        keys[keyName].hwid = null;
+        kicked[keyName.toLowerCase()] = Date.now();
+        await saveKey(keyName);
+        
+        console.log(`[RESET HWID] Key ${keyName} resetada pelo usuário ${discordId}`);
+        
+        res.json({ ok: true, message: "HWID resetado com sucesso!" });
+    } catch (e) {
+        console.error("[API] Erro em /api/reset-hwid:", e.message);
+        res.status(500).json({ error: "Erro ao resetar HWID" });
+    }
+});
+
+// Rota para obter cargo Buyer
+app.post("/api/get-role", requireAuth, async (req, res) => {
+    try {
+        const discordId = req.user.discordId;
+        
+        // Busca a key do usuário
+        const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === discordId);
+        
+        if (!keyEntry) {
+            return res.status(404).json({ error: "Você não possui uma key ativa" });
+        }
+        
+        const keyData = keyEntry[1];
+        const now = Date.now();
+        
+        // Verifica se a key está ativa (não pausada e não expirada)
+        if (keyData.paused) {
+            return res.status(400).json({ error: "Sua key está pausada" });
+        }
+        
+        if (keyData.expiry !== Infinity && keyData.expiry <= now) {
+            return res.status(400).json({ error: "Sua key está expirada" });
+        }
+        
+        // Adiciona o cargo Buyer
+        await addBuyerRole(discordId);
+        
+        console.log(`[GET ROLE] Cargo Buyer solicitado por ${discordId}`);
+        
+        res.json({ ok: true, message: "Cargo Buyer adicionado com sucesso!" });
+    } catch (e) {
+        console.error("[API] Erro em /api/get-role:", e.message);
+        res.status(500).json({ error: "Erro ao adicionar cargo" });
+    }
 });
 
 // Rota para Top Deposits (ranking dos maiores depositantes)

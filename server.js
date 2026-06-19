@@ -1175,13 +1175,16 @@ app.get("/api/online", async (req, res) => {
         // Conta quantos estão realmente online (executando script)
         const onlineCount = Object.values(presence).filter(p => now - p.lastSeen < ONLINE_STALE_MS).length;
         
+        // slotsUsed e onlineNow = quantidade de keys ativas
+        const slotsUsed = activeKeys.length;
+        
         res.json({ 
             online: activeKeys, 
             count: activeKeys.length, 
-            onlineNow: onlineCount,
+            onlineNow: activeKeys.length, // Mostra quantidade de keys ativas
             maxSlots: MAX_SLOTS, 
-            slotsUsed: onlineCount, 
-            slotsAvailable: Math.max(0, MAX_SLOTS - onlineCount), 
+            slotsUsed: slotsUsed, 
+            slotsAvailable: Math.max(0, MAX_SLOTS - slotsUsed), 
             serverTime: now 
         });
     } catch (e) {

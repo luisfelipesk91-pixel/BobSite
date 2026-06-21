@@ -2219,6 +2219,13 @@ function buildLogsRows() {
             new ButtonBuilder().setCustomId("logs_plan_edit").setLabel("Editar Plano").setEmoji("📦").setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId("logs_blocked").setLabel("IPs Bloqueados").setEmoji("🔒").setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId("logs_unblock").setLabel("Desbloquear IP").setEmoji("🔓").setStyle(ButtonStyle.Secondary)
+        ),
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId("logs_edit_price").setLabel("Editar Preço").setEmoji("💰").setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId("logs_view_price").setLabel("Ver Preço").setEmoji("💵").setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId("logs_deposits_pending").setLabel("Depósitos Pendentes").setEmoji("📥").setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId("logs_approve_deposit").setLabel("Aprovar Depósito").setEmoji("✅").setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId("logs_reject_deposit").setLabel("Rejeitar Depósito").setEmoji("❌").setStyle(ButtonStyle.Danger)
         )
     ];
 }
@@ -2269,6 +2276,132 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
     if (id === "logs_coupon_create") { await interaction.showModal(new ModalBuilder().setCustomId("modal_coupon_create").setTitle("🎟️ Criar Cupom").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("code").setLabel("Código:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("discount").setLabel("Desconto:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("type").setLabel("Tipo (percent/fixed):").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("maxuses").setLabel("Máx usos:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
     if (id === "logs_coupon_list") { await interaction.deferReply({ ephemeral: true }); const coupons = await Coupon.find({ active: true }); if (!coupons.length) { await interaction.editReply({ content: "Nenhum cupom." }); return; } await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.gold).setTitle("🎟️ Cupons").setDescription(coupons.map(c => `• \`${c.code}\` — **${c.discount}${c.type === "percent" ? "%" : " R$"}** — ${c.usedCount}/${c.maxUses}`).join("\n")).setTimestamp()] }); return; }
     if (id === "logs_plan_edit") { await interaction.showModal(new ModalBuilder().setCustomId("modal_plan_edit").setTitle("📦 Editar Plano").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("value").setLabel("ID do plano:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("price").setLabel("Preço:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("active").setLabel("Ativo? (sim/nao):").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
+    
+    // ═══ NOVOS BOTÕES: EDITAR PREÇO E APROVAR DEPÓSITOS ═══
+    if (id === "logs_view_price") { 
+        await interaction.deferReply({ ephemeral: true }); 
+        await interaction.editReply({ 
+            embeds: [new EmbedBuilder()
+                .setColor(COLORS.primary)
+                .setTitle("💰 Preço Atual")
+                .setDescription(`**R$${PRICE_PER_HOUR.toFixed(2)}** por hora`)
+                .setTimestamp()
+            ] 
+        }); 
+        return; 
+    }
+    
+    if (id === "logs_edit_price") { 
+        await interaction.showModal(new ModalBuilder()
+            .setCustomId("modal_edit_price")
+            .setTitle("💰 Editar Preço por Hora")
+            .addComponents(
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("new_price")
+                        .setLabel("Novo preço (ex: 2.50):")
+                        .setStyle(TextInputStyle.Short)
+                        .setPlaceholder("2.00")
+                        .setRequired(true)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("key_pass")
+                        .setLabel("Senha:")
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                )
+            )
+        ); 
+        return; 
+    }
+    
+    if (id === "logs_deposits_pending") { 
+        await interaction.deferReply({ ephemeral: true }); 
+        const pending = await Recharge.find({ status: "pending" }).sort({ createdAt: -1 }); 
+        
+        if (!pending.length) { 
+            await interaction.editReply({ content: "✅ Nenhum depósito pendente!" }); 
+            return; 
+        } 
+        
+        const embed = new EmbedBuilder()
+            .setColor(COLORS.warning)
+            .setTitle(`📥 Depósitos Pendentes (${pending.length})`)
+            .setTimestamp();
+        
+        let description = "";
+        for (const p of pending) {
+            const timeAgo = Math.floor((Date.now() - new Date(p.createdAt).getTime()) / 60000);
+            description += `• **${p.discordTag || "Desconhecido"}**\n`;
+            description += `  └ Código: \`${p.code}\`\n`;
+            description += `  └ Valor: **R$${p.amount.toFixed(2)}**\n`;
+            description += `  └ Há ${timeAgo}min\n\n`;
+        }
+        
+        embed.setDescription(description.substring(0, 4000));
+        await interaction.editReply({ embeds: [embed] }); 
+        return; 
+    }
+    
+    if (id === "logs_approve_deposit") { 
+        await interaction.showModal(new ModalBuilder()
+            .setCustomId("modal_approve_deposit")
+            .setTitle("✅ Aprovar Depósito")
+            .addComponents(
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("deposit_code")
+                        .setLabel("Código do depósito (ex: PIX-ABC123):")
+                        .setStyle(TextInputStyle.Short)
+                        .setPlaceholder("PIX-ABC123")
+                        .setRequired(true)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("key_pass")
+                        .setLabel("Senha:")
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                )
+            )
+        ); 
+        return; 
+    }
+    
+    if (id === "logs_reject_deposit") { 
+        await interaction.showModal(new ModalBuilder()
+            .setCustomId("modal_reject_deposit")
+            .setTitle("❌ Rejeitar Depósito")
+            .addComponents(
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("deposit_code")
+                        .setLabel("Código do depósito (ex: PIX-ABC123):")
+                        .setStyle(TextInputStyle.Short)
+                        .setPlaceholder("PIX-ABC123")
+                        .setRequired(true)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("reject_reason")
+                        .setLabel("Motivo (opcional):")
+                        .setStyle(TextInputStyle.Short)
+                        .setPlaceholder("Comprovante inválido")
+                        .setRequired(false)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("key_pass")
+                        .setLabel("Senha:")
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                )
+            )
+        ); 
+        return; 
+    }
+    // ═══ FIM DOS NOVOS BOTÕES ═══
     if (id.startsWith("pay_confirm_")) { await interaction.deferReply({ ephemeral: true }); const parts = id.split("_"), targetId = parts[2], hours = parseInt(parts[3]); const pending = await PendingPayment.findOne({ discordId: targetId }); const target = await fetchUserFromAnyClient(targetId); if (!target) { await interaction.editReply({ content: "❌ Não encontrado!" }); return; } await confirmarPagamento(target, hours, interaction.channel, interaction.user.id, pending?.finalPrice || pending?.price, pending?.label, pending?.couponUsed); if (pending?.couponUsed) await consumeCoupon(pending.couponUsed, targetId); await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `✅ Confirmado!` }); return; }
     if (id.startsWith("pay_cancel_")) { await interaction.deferReply({ ephemeral: true }); const targetId = id.replace("pay_cancel_", ""); const pending = await PendingPayment.findOne({ discordId: targetId }); if (!pending) { await interaction.editReply({ content: "❌ Não encontrado." }); return; } await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `🗑️ Cancelado.` }); return; }
     const modalMap = { logs_create: buildModal_create, logs_lifetime: buildModal_lifetime, logs_revoke: buildModal_revoke, logs_pause: buildModal_pause, logs_reset: buildModal_reset, logs_addtime: buildModal_addtime, logs_setexpiry: buildModal_setexpiry, logs_transfer: buildModal_transfer, logs_sethwid: buildModal_sethwid, logs_lookup: buildModal_lookup, logs_unblock: buildModal_unblock, logs_cleanlogs: buildModal_cleanlogs };
@@ -2371,6 +2504,12 @@ async function handleLogsModal(interaction) {
     if (id === "modal_cancel_pedido") { const userId = getField("user_id").replace(/\D/g, ""), motivo = getField("motivo").trim() || "Sem motivo"; const pending = await PendingPayment.findOne({ discordId: userId }); if (!pending) { await interaction.editReply({ content: "❌ Não encontrado." }); return; } await PendingPayment.deleteOne({ discordId: userId }); await interaction.editReply({ content: `🗑️ Cancelado. Motivo: *${motivo}*` }); return; }
     if (id === "modal_coupon_create") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const code = getField("code").trim().toUpperCase(), discount = parseFloat(getField("discount").trim()), type = getField("type").trim().toLowerCase() === "fixed" ? "fixed" : "percent", maxUses = parseInt(getField("maxuses").trim()) || 1; if (!code || isNaN(discount)) { await interaction.editReply({ content: "❌ Dados inválidos!" }); return; } const existing = await Coupon.findOne({ code }); if (existing) { await interaction.editReply({ content: `❌ \`${code}\` já existe!` }); return; } await Coupon.create({ code, discount, type, maxUses }); await interaction.editReply({ content: `✅ Cupom \`${code}\` criado!` }); return; }
     if (id === "modal_plan_edit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const value = getField("value").trim().toLowerCase(), price = parseFloat(getField("price").trim()), activeRaw = getField("active").trim().toLowerCase(), active = activeRaw === "sim" || activeRaw === "yes" || activeRaw === "true"; const plan = PLANS.find(p => p.value === value); if (!plan) { await interaction.editReply({ content: `❌ Plano \`${value}\` não encontrado.` }); return; } if (!isNaN(price)) plan.price = price; plan.active = active; await PlanModel.findOneAndUpdate({ value }, { price: plan.price, active }, { upsert: true }); await interaction.editReply({ content: `✅ Plano \`${value}\` atualizado!` }); return; }
+    
+    // ═══ NOVOS HANDLERS DE MODAIS ═══
+    if (id === "modal_edit_price") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const newPrice = parseFloat(getField("new_price").trim()); if (isNaN(newPrice) || newPrice <= 0) { await interaction.editReply({ content: "❌ Preço inválido!" }); return; } const oldPrice = PRICE_PER_HOUR; PRICE_PER_HOUR = newPrice; console.log(`[BOBLOGS] Preço: R$${oldPrice.toFixed(2)} → R$${PRICE_PER_HOUR.toFixed(2)}`); const embed = new EmbedBuilder().setColor(COLORS.success).setTitle("💰 Preço Atualizado").addFields({ name: "Anterior", value: `R$${oldPrice.toFixed(2)}`, inline: true },{ name: "Novo", value: `R$${PRICE_PER_HOUR.toFixed(2)}`, inline: true }).setFooter({ text: `Por ${interaction.user.tag}` }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); await interaction.editReply({ content: `✅ Preço → **R$${PRICE_PER_HOUR.toFixed(2)}**/h!` }); return; }
+    if (id === "modal_approve_deposit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const code = getField("deposit_code").trim().toUpperCase(); const recharge = await Recharge.findOne({ code, status: "pending" }); if (!recharge) { await interaction.editReply({ content: `❌ \`${code}\` não encontrado!` }); return; } const { discordId, discordTag, amount } = recharge; recharge.status = "confirmed"; recharge.confirmedBy = interaction.user.id; await recharge.save(); const user = await User.findOne({ discordId }); if (!user) { await interaction.editReply({ content: "❌ Usuário não encontrado!" }); return; } user.balance += amount; await user.save(); await new Transaction({ discordId, type: "deposit", amount, description: `PIX aprovado (${code})` }).save(); console.log(`[BOBLOGS] Aprovado: ${code} | R$${amount} → ${discordTag}`); const embed = new EmbedBuilder().setColor(COLORS.success).setTitle("✅ Depósito Aprovado").addFields({ name: "Usuário", value: `<@${discordId}>`, inline: true },{ name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },{ name: "Código", value: `\`${code}\``, inline: true },{ name: "Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); try { const userObj = await fetchUserFromAnyClient(discordId); if (userObj) { await userObj.send({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("✅ Depósito Confirmado!").setDescription(`R$${amount.toFixed(2)} aprovado!`).addFields({ name: "Código", value: `\`${code}\``, inline: true },{ name: "Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }).setTimestamp()] }); } } catch (e) { console.error("[BOBLOGS] DM erro:", e.message); } await interaction.editReply({ content: `✅ R$${amount.toFixed(2)} → ${discordTag}!` }); return; }
+    if (id === "modal_reject_deposit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const code = getField("deposit_code").trim().toUpperCase(); const reason = getField("reject_reason").trim() || "Sem motivo"; const recharge = await Recharge.findOne({ code, status: "pending" }); if (!recharge) { await interaction.editReply({ content: `❌ \`${code}\` não encontrado!` }); return; } const { discordId, discordTag, amount } = recharge; recharge.status = "cancelled"; await recharge.save(); console.log(`[BOBLOGS] Rejeitado: ${code} | ${reason}`); const embed = new EmbedBuilder().setColor(COLORS.danger).setTitle("❌ Depósito Rejeitado").addFields({ name: "Usuário", value: `<@${discordId}>`, inline: true },{ name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },{ name: "Código", value: `\`${code}\``, inline: true },{ name: "Motivo", value: reason, inline: false }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); try { const userObj = await fetchUserFromAnyClient(discordId); if (userObj) { await userObj.send({ embeds: [new EmbedBuilder().setColor(COLORS.danger).setTitle("❌ Depósito Rejeitado").setDescription(`R$${amount.toFixed(2)} rejeitado.`).addFields({ name: "Motivo", value: reason }).setTimestamp()] }); } } catch (e) { console.error("[BOBLOGS] DM erro:", e.message); } await interaction.editReply({ content: `✅ Rejeitado: \`${code}\`` }); return; }
+    // ═══ FIM DOS HANDLERS ═══
 }
 
 // Funções auxiliares para modais e interações
@@ -2540,6 +2679,271 @@ if (DISCORD_TOKEN_NOTIFIER) clientNotifier.login(DISCORD_TOKEN_NOTIFIER);
 if (DISCORD_TOKEN_LOGS) clientLogs.login(DISCORD_TOKEN_LOGS);
 if (DISCORD_TOKEN_PANEL) clientPanel.login(DISCORD_TOKEN_PANEL);
 if (DISCORD_TOKEN_PAYMENT) clientPayment.login(DISCORD_TOKEN_PAYMENT);
+
+// ─── NOVA ROTA: OBTER PREÇO POR HORA (PÚBLICO) ───────────────────────────────
+// Variável global para o preço por hora (padrão R$2.00)
+let PRICE_PER_HOUR = 2.00;
+
+app.get("/api/price", (req, res) => {
+    res.json({ pricePerHour: PRICE_PER_HOUR });
+});
+
+// ─── NOVA ROTA: EDITAR PREÇO POR HORA (ADMIN) ────────────────────────────────
+app.post("/api/admin/price", requireAdminAuth, async (req, res) => {
+    try {
+        const { pricePerHour } = req.body;
+        
+        if (!pricePerHour || isNaN(pricePerHour) || pricePerHour <= 0) {
+            return res.status(400).json({ error: "Preço inválido" });
+        }
+        
+        PRICE_PER_HOUR = parseFloat(pricePerHour);
+        
+        console.log(`[ADMIN] Preço por hora alterado para R$${PRICE_PER_HOUR.toFixed(2)}`);
+        
+        // Envia notificação no canal de logs
+        if (LOGS_CHANNEL_ID && clientLogs.isReady()) {
+            try {
+                const channel = await clientLogs.channels.fetch(LOGS_CHANNEL_ID);
+                if (channel) {
+                    const embed = new EmbedBuilder()
+                        .setColor(COLORS.success)
+                        .setTitle("💰 Preço Atualizado")
+                        .setDescription(`Novo preço por hora: **R$${PRICE_PER_HOUR.toFixed(2)}**`)
+                        .setTimestamp();
+                    await channel.send({ embeds: [embed] });
+                }
+            } catch (e) {
+                console.error("[ADMIN] Erro ao enviar notificação:", e.message);
+            }
+        }
+        
+        res.json({ 
+            ok: true, 
+            newPrice: PRICE_PER_HOUR,
+            message: `Preço por hora alterado para R$${PRICE_PER_HOUR.toFixed(2)}`
+        });
+    } catch (e) {
+        console.error("[ADMIN] Erro ao alterar preço:", e.message);
+        res.status(500).json({ error: "Erro ao alterar preço" });
+    }
+});
+
+// ─── NOVA ROTA: LISTAR DEPÓSITOS PENDENTES (ADMIN) ───────────────────────────
+app.get("/api/admin/deposits/pending", requireAdminAuth, async (req, res) => {
+    try {
+        const pending = await Recharge.find({ status: "pending" }).sort({ createdAt: -1 });
+        
+        const enriched = await Promise.all(pending.map(async (p) => {
+            try {
+                const user = await fetchUserFromAnyClient(p.discordId);
+                return {
+                    _id: p._id,
+                    discordId: p.discordId,
+                    discordTag: p.discordTag || (user ? user.tag : "Desconhecido"),
+                    avatar: user ? user.displayAvatarURL() : null,
+                    amount: p.amount,
+                    code: p.code,
+                    createdAt: p.createdAt,
+                    status: p.status
+                };
+            } catch (e) {
+                return {
+                    _id: p._id,
+                    discordId: p.discordId,
+                    discordTag: p.discordTag || "Desconhecido",
+                    avatar: null,
+                    amount: p.amount,
+                    code: p.code,
+                    createdAt: p.createdAt,
+                    status: p.status
+                };
+            }
+        }));
+        
+        res.json(enriched);
+    } catch (e) {
+        console.error("[ADMIN] Erro ao listar depósitos:", e.message);
+        res.status(500).json({ error: "Erro ao listar depósitos" });
+    }
+});
+
+// ─── NOVA ROTA: APROVAR DEPÓSITO E ADICIONAR SALDO (ADMIN) ───────────────────
+app.post("/api/admin/deposits/approve", requireAdminAuth, async (req, res) => {
+    try {
+        const { code, adminId } = req.body;
+        
+        if (!code) {
+            return res.status(400).json({ error: "Código do depósito é obrigatório" });
+        }
+        
+        // Busca o depósito pendente
+        const recharge = await Recharge.findOne({ code: code.toUpperCase(), status: "pending" });
+        
+        if (!recharge) {
+            return res.status(404).json({ error: "Depósito não encontrado ou já processado" });
+        }
+        
+        const { discordId, discordTag, amount } = recharge;
+        
+        // Atualiza o status do depósito para confirmado
+        recharge.status = "confirmed";
+        recharge.confirmedBy = adminId || "admin";
+        await recharge.save();
+        
+        // Adiciona saldo ao usuário
+        const user = await User.findOne({ discordId });
+        if (!user) {
+            return res.status(404).json({ error: "Usuário não encontrado" });
+        }
+        
+        user.balance += amount;
+        await user.save();
+        
+        // Registra transação
+        await new Transaction({
+            discordId,
+            type: "deposit",
+            amount,
+            description: `Depósito PIX aprovado (${code})`
+        }).save();
+        
+        console.log(`[ADMIN] Depósito aprovado: ${code} | R$${amount} → ${discordTag}`);
+        
+        // Envia notificação no canal de logs
+        if (LOGS_CHANNEL_ID && clientLogs.isReady()) {
+            try {
+                const channel = await clientLogs.channels.fetch(LOGS_CHANNEL_ID);
+                if (channel) {
+                    const embed = new EmbedBuilder()
+                        .setColor(COLORS.success)
+                        .setTitle("✅ Depósito Aprovado")
+                        .addFields(
+                            { name: "Usuário", value: `<@${discordId}> (${discordTag})`, inline: true },
+                            { name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },
+                            { name: "Código", value: `\`${code}\``, inline: true },
+                            { name: "Aprovado por", value: adminId ? `<@${adminId}>` : "Admin", inline: true },
+                            { name: "Novo Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }
+                        )
+                        .setTimestamp();
+                    await channel.send({ embeds: [embed] });
+                }
+            } catch (e) {
+                console.error("[ADMIN] Erro ao enviar notificação:", e.message);
+            }
+        }
+        
+        // Tenta enviar DM ao usuário
+        try {
+            const userObj = await fetchUserFromAnyClient(discordId);
+            if (userObj) {
+                const embed = new EmbedBuilder()
+                    .setColor(COLORS.success)
+                    .setTitle("✅ Depósito Confirmado!")
+                    .setDescription(`Seu depósito de **R$${amount.toFixed(2)}** foi aprovado e adicionado ao seu saldo!`)
+                    .addFields(
+                        { name: "Código", value: `\`${code}\``, inline: true },
+                        { name: "Novo Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }
+                    )
+                    .setFooter({ text: "Bob Notifier" })
+                    .setTimestamp();
+                await userObj.send({ embeds: [embed] });
+            }
+        } catch (e) {
+            console.error("[ADMIN] Erro ao enviar DM:", e.message);
+        }
+        
+        res.json({ 
+            ok: true, 
+            amount,
+            discordTag,
+            discordId,
+            newBalance: user.balance,
+            message: `Depósito aprovado: R$${amount.toFixed(2)} adicionado ao saldo de ${discordTag}`
+        });
+        
+    } catch (e) {
+        console.error("[ADMIN] Erro ao aprovar depósito:", e.message);
+        res.status(500).json({ error: "Erro ao aprovar depósito" });
+    }
+});
+
+// ─── NOVA ROTA: REJEITAR/CANCELAR DEPÓSITO (ADMIN) ───────────────────────────
+app.post("/api/admin/deposits/reject", requireAdminAuth, async (req, res) => {
+    try {
+        const { code, reason } = req.body;
+        
+        if (!code) {
+            return res.status(400).json({ error: "Código do depósito é obrigatório" });
+        }
+        
+        // Busca o depósito pendente
+        const recharge = await Recharge.findOne({ code: code.toUpperCase(), status: "pending" });
+        
+        if (!recharge) {
+            return res.status(404).json({ error: "Depósito não encontrado ou já processado" });
+        }
+        
+        const { discordId, discordTag, amount } = recharge;
+        
+        // Atualiza o status do depósito para cancelado
+        recharge.status = "cancelled";
+        await recharge.save();
+        
+        console.log(`[ADMIN] Depósito rejeitado: ${code} | R$${amount} → ${discordTag}`);
+        
+        // Envia notificação no canal de logs
+        if (LOGS_CHANNEL_ID && clientLogs.isReady()) {
+            try {
+                const channel = await clientLogs.channels.fetch(LOGS_CHANNEL_ID);
+                if (channel) {
+                    const embed = new EmbedBuilder()
+                        .setColor(COLORS.danger)
+                        .setTitle("❌ Depósito Rejeitado")
+                        .addFields(
+                            { name: "Usuário", value: `<@${discordId}> (${discordTag})`, inline: true },
+                            { name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },
+                            { name: "Código", value: `\`${code}\``, inline: true }
+                        )
+                        .setDescription(reason ? `**Motivo:** ${reason}` : null)
+                        .setTimestamp();
+                    await channel.send({ embeds: [embed] });
+                }
+            } catch (e) {
+                console.error("[ADMIN] Erro ao enviar notificação:", e.message);
+            }
+        }
+        
+        // Tenta enviar DM ao usuário
+        try {
+            const userObj = await fetchUserFromAnyClient(discordId);
+            if (userObj) {
+                const embed = new EmbedBuilder()
+                    .setColor(COLORS.danger)
+                    .setTitle("❌ Depósito Rejeitado")
+                    .setDescription(`Seu depósito de **R$${amount.toFixed(2)}** foi rejeitado.`)
+                    .addFields(
+                        { name: "Código", value: `\`${code}\``, inline: true }
+                    )
+                    .setDescription(reason ? `**Motivo:** ${reason}` : "Entre em contato com o suporte para mais informações.")
+                    .setFooter({ text: "Bob Notifier" })
+                    .setTimestamp();
+                await userObj.send({ embeds: [embed] });
+            }
+        } catch (e) {
+            console.error("[ADMIN] Erro ao enviar DM:", e.message);
+        }
+        
+        res.json({ 
+            ok: true,
+            message: `Depósito rejeitado: ${code}`
+        });
+        
+    } catch (e) {
+        console.error("[ADMIN] Erro ao rejeitar depósito:", e.message);
+        res.status(500).json({ error: "Erro ao rejeitar depósito" });
+    }
+});
 
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {

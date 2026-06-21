@@ -2215,17 +2215,10 @@ function buildLogsRows() {
         ),
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId("logs_coupon_create").setLabel("Criar Cupom").setEmoji("🎟️").setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId("logs_coupon_list").setLabel("Listar Cupons").setEmoji("🎫").setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId("logs_plan_edit").setLabel("Editar Plano").setEmoji("📦").setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId("logs_blocked").setLabel("IPs Bloqueados").setEmoji("🔒").setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId("logs_unblock").setLabel("Desbloquear IP").setEmoji("🔓").setStyle(ButtonStyle.Secondary)
-        ),
-        new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId("logs_edit_price").setLabel("Editar Preço").setEmoji("💰").setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId("logs_view_price").setLabel("Ver Preço").setEmoji("💵").setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId("logs_deposits_pending").setLabel("Depósitos Pendentes").setEmoji("📥").setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId("logs_approve_deposit").setLabel("Aprovar Depósito").setEmoji("✅").setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId("logs_reject_deposit").setLabel("Rejeitar Depósito").setEmoji("❌").setStyle(ButtonStyle.Danger)
+            new ButtonBuilder().setCustomId("logs_deposits_pending").setLabel("Depósitos").setEmoji("📥").setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId("logs_approve_deposit").setLabel("Aprovar").setEmoji("✅").setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId("logs_reject_deposit").setLabel("Rejeitar").setEmoji("❌").setStyle(ButtonStyle.Danger)
         )
     ];
 }

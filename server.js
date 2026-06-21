@@ -2072,7 +2072,7 @@ function buildOdysseyEmbed() {
         .setTimestamp()
         .setFooter({ text: `Updates every 30 seconds | discord.gg/kHSC6xD2dz` });
     
-    let description = `**Bob Notifier (R$2,50/hora) — ${usedSlots}/${maxSlots}**\n\n`;
+    let description = `**Bob Notifier (R$${PRICE_PER_HOUR.toFixed(2)}/hora) — ${usedSlots}/${maxSlots}**\n\n`;
     
     if (activeKeys.length === 0) {
         description += "• *Nenhuma key ativa no momento*\n";

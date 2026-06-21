@@ -1313,7 +1313,7 @@ app.post("/api/buy", requireAuth, async (req, res) => {
     }
     
     // Preço: R$2,50 por hora
-    const pricePerHour = 2.00;
+    const pricePerHour = 2.50;
     const totalPrice = hours * pricePerHour;
     
     const user = await User.findOne({ discordId: req.user.discordId });

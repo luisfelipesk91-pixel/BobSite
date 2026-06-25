@@ -23,7 +23,7 @@ const RATE_LIMIT_WINDOW  = 60_000;
 const BLOCK_DURATION     = 5  * 60 * 1_000;
 const PENDING_EXPIRY_MS  = 15 * 60 * 1_000;
 const KEY_WARN_BEFORE_MS = 30 * 60 * 1_000;
-const MAX_SLOTS          = parseInt(process.env.MAX_SLOTS || "3");
+const MAX_SLOTS          = parseInt(process.env.MAX_SLOTS || "6");
 
 const COLORS = {
     primary:  0x5865F2, success:  0x00E676, danger:   0xFF3C3C,

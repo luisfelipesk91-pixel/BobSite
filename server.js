@@ -24,7 +24,6 @@ const BLOCK_DURATION     = 5  * 60 * 1_000;
 const PENDING_EXPIRY_MS  = 15 * 60 * 1_000;
 const KEY_WARN_BEFORE_MS = 30 * 60 * 1_000;
 const MAX_SLOTS          = parseInt(process.env.MAX_SLOTS || "6");
-let PRICE_PER_HOUR       = 2.00; // Movido para o topo para evitar ReferenceError
 
 const COLORS = {
     primary:  0x5865F2, success:  0x00E676, danger:   0xFF3C3C,
@@ -2300,7 +2299,7 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
     }
     
     if (id === "logs_edit_price") { 
-        const modal = new ModalBuilder()
+        await interaction.showModal(new ModalBuilder()
             .setCustomId("modal_edit_price")
             .setTitle("💰 Editar Preço por Hora")
             .addComponents(
@@ -2309,7 +2308,7 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
                         .setCustomId("new_price")
                         .setLabel("Novo preço (ex: 2.50):")
                         .setStyle(TextInputStyle.Short)
-                        .setPlaceholder("2.00")
+                        .setPlaceholder("7.50")
                         .setRequired(true)
                 ),
                 new ActionRowBuilder().addComponents(
@@ -2319,8 +2318,8 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
                         .setStyle(TextInputStyle.Short)
                         .setRequired(true)
                 )
-            );
-        await interaction.showModal(modal); 
+            )
+        ); 
         return; 
     }
     
@@ -2527,34 +2526,7 @@ async function handleLogsModal(interaction) {
     if (id === "modal_plan_edit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const value = getField("value").trim().toLowerCase(), price = parseFloat(getField("price").trim()), activeRaw = getField("active").trim().toLowerCase(), active = activeRaw === "sim" || activeRaw === "yes" || activeRaw === "true"; const plan = PLANS.find(p => p.value === value); if (!plan) { await interaction.editReply({ content: `❌ Plano \`${value}\` não encontrado.` }); return; } if (!isNaN(price)) plan.price = price; plan.active = active; await PlanModel.findOneAndUpdate({ value }, { price: plan.price, active }, { upsert: true }); await interaction.editReply({ content: `✅ Plano \`${value}\` atualizado!` }); return; }
     
     // ═══ NOVOS HANDLERS DE MODAIS ═══
-    if (id === "modal_edit_price") { 
-        if (wrongPass(getField("key_pass"))) { 
-            await interaction.editReply({ content: "❌ Senha incorreta!" }); 
-            return; 
-        } 
-        const newPrice = parseFloat(getField("new_price").trim()); 
-        if (isNaN(newPrice) || newPrice <= 0) { 
-            await interaction.editReply({ content: "❌ Preço inválido!" }); 
-            return; 
-        } 
-        const oldPrice = PRICE_PER_HOUR; 
-        PRICE_PER_HOUR = newPrice; 
-        console.log(`[BOBLOGS] Preço: R$${oldPrice.toFixed(2)} → R$${PRICE_PER_HOUR.toFixed(2)}`); 
-        
-        const embed = new EmbedBuilder()
-            .setColor(COLORS.success)
-            .setTitle("💰 Preço Atualizado")
-            .addFields(
-                { name: "Anterior", value: `R$${oldPrice.toFixed(2)}`, inline: true },
-                { name: "Novo", value: `R$${PRICE_PER_HOUR.toFixed(2)}`, inline: true }
-            )
-            .setFooter({ text: `Por ${interaction.user.tag}` })
-            .setTimestamp(); 
-            
-        await interaction.channel.send({ embeds: [embed] }).catch(err => console.error("[LOGS] Erro ao enviar embed de preço:", err.message));
-        await interaction.editReply({ content: `✅ Preço atualizado para **R$${PRICE_PER_HOUR.toFixed(2)}**/h!` }); 
-        return; 
-    }
+    if (id === "modal_edit_price") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const newPrice = parseFloat(getField("new_price").trim()); if (isNaN(newPrice) || newPrice <= 0) { await interaction.editReply({ content: "❌ Preço inválido!" }); return; } const oldPrice = PRICE_PER_HOUR; PRICE_PER_HOUR = newPrice; console.log(`[BOBLOGS] Preço: R$${oldPrice.toFixed(2)} → R$${PRICE_PER_HOUR.toFixed(2)}`); const embed = new EmbedBuilder().setColor(COLORS.success).setTitle("💰 Preço Atualizado").addFields({ name: "Anterior", value: `R$${oldPrice.toFixed(2)}`, inline: true },{ name: "Novo", value: `R$${PRICE_PER_HOUR.toFixed(2)}`, inline: true }).setFooter({ text: `Por ${interaction.user.tag}` }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); await interaction.editReply({ content: `✅ Preço → **R$${PRICE_PER_HOUR.toFixed(2)}**/h!` }); return; }
     if (id === "modal_approve_deposit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const code = getField("deposit_code").trim().toUpperCase(); const recharge = await Recharge.findOne({ code, status: "pending" }); if (!recharge) { await interaction.editReply({ content: `❌ \`${code}\` não encontrado!` }); return; } const { discordId, discordTag, amount } = recharge; recharge.status = "confirmed"; recharge.confirmedBy = interaction.user.id; await recharge.save(); const user = await User.findOne({ discordId }); if (!user) { await interaction.editReply({ content: "❌ Usuário não encontrado!" }); return; } user.balance += amount; await user.save(); await new Transaction({ discordId, type: "deposit", amount, description: `PIX aprovado (${code})` }).save(); console.log(`[BOBLOGS] Aprovado: ${code} | R$${amount} → ${discordTag}`); const embed = new EmbedBuilder().setColor(COLORS.success).setTitle("✅ Depósito Aprovado").addFields({ name: "Usuário", value: `<@${discordId}>`, inline: true },{ name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },{ name: "Código", value: `\`${code}\``, inline: true },{ name: "Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); try { const userObj = await fetchUserFromAnyClient(discordId); if (userObj) { await userObj.send({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("✅ Depósito Confirmado!").setDescription(`R$${amount.toFixed(2)} aprovado!`).addFields({ name: "Código", value: `\`${code}\``, inline: true },{ name: "Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }).setTimestamp()] }); } } catch (e) { console.error("[BOBLOGS] DM erro:", e.message); } await interaction.editReply({ content: `✅ R$${amount.toFixed(2)} → ${discordTag}!` }); return; }
     if (id === "modal_reject_deposit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const code = getField("deposit_code").trim().toUpperCase(); const reason = getField("reject_reason").trim() || "Sem motivo"; const recharge = await Recharge.findOne({ code, status: "pending" }); if (!recharge) { await interaction.editReply({ content: `❌ \`${code}\` não encontrado!` }); return; } const { discordId, discordTag, amount } = recharge; recharge.status = "cancelled"; await recharge.save(); console.log(`[BOBLOGS] Rejeitado: ${code} | ${reason}`); const embed = new EmbedBuilder().setColor(COLORS.danger).setTitle("❌ Depósito Rejeitado").addFields({ name: "Usuário", value: `<@${discordId}>`, inline: true },{ name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },{ name: "Código", value: `\`${code}\``, inline: true },{ name: "Motivo", value: reason, inline: false }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); try { const userObj = await fetchUserFromAnyClient(discordId); if (userObj) { await userObj.send({ embeds: [new EmbedBuilder().setColor(COLORS.danger).setTitle("❌ Depósito Rejeitado").setDescription(`R$${amount.toFixed(2)} rejeitado.`).addFields({ name: "Motivo", value: reason }).setTimestamp()] }); } } catch (e) { console.error("[BOBLOGS] DM erro:", e.message); } await interaction.editReply({ content: `✅ Rejeitado: \`${code}\`` }); return; }
     // ═══ FIM DOS HANDLERS ═══
@@ -2735,8 +2707,8 @@ if (DISCORD_TOKEN_PANEL) clientPanel.login(DISCORD_TOKEN_PANEL);
 if (DISCORD_TOKEN_PAYMENT) clientPayment.login(DISCORD_TOKEN_PAYMENT);
 
 // ─── NOVA ROTA: OBTER PREÇO POR HORA (PÚBLICO) ───────────────────────────────
-// Variável global para o preço por hora (padrão R$2.00)
-// PRICE_PER_HOUR já declarado no topo
+// Variável global para o preço por hora (padrão R$7.50)
+let PRICE_PER_HOUR = 7.50;
 
 app.get("/api/price", (req, res) => {
     res.json({ pricePerHour: PRICE_PER_HOUR });

@@ -2290,7 +2290,12 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
         if (modalMap[id]) { await interaction.showModal(modalMap[id]()); return; }
 
         // Comandos que NÃO são modais levam deferReply
-        await interaction.deferReply({ flags: [64] }).catch(() => {});
+        try {
+            await interaction.deferReply({ flags: [64] });
+        } catch (e) {
+            console.error("[LOGS] Erro ao dar defer:", e.message);
+            return;
+        }
 
         if (id === "logs_online") { const sentMsg = await interaction.editReply({ embeds: [buildOnlineEmbed()] }); startOnlineInterval(interaction.channelId, sentMsg); return; }
         if (id === "logs_stoponline") { stopOnlineInterval(interaction.channelId); await interaction.editReply({ content: "⏹️ Parado." }); return; }
@@ -2381,8 +2386,16 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
         return; 
     }
     // ═══ FIM DOS NOVOS BOTÕES ═══
-    if (id.startsWith("pay_confirm_")) { const parts = id.split("_"), targetId = parts[2], hours = parseInt(parts[3]); const pending = await PendingPayment.findOne({ discordId: targetId }); const target = await fetchUserFromAnyClient(targetId); if (!target) { await interaction.editReply({ content: "❌ Não encontrado!" }); return; } await confirmarPagamento(target, hours, interaction.channel, interaction.user.id, pending?.finalPrice || pending?.price, pending?.label, pending?.couponUsed); if (pending?.couponUsed) await consumeCoupon(pending.couponUsed, targetId); await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `✅ Confirmado!` }); return; }
+        if (id.startsWith("pay_confirm_")) { const parts = id.split("_"), targetId = parts[2], hours = parseInt(parts[3]); const pending = await PendingPayment.findOne({ discordId: targetId }); const target = await fetchUserFromAnyClient(targetId); if (!target) { await interaction.editReply({ content: "❌ Não encontrado!" }); return; } await confirmarPagamento(target, hours, interaction.channel, interaction.user.id, pending?.finalPrice || pending?.price, pending?.label, pending?.couponUsed); if (pending?.couponUsed) await consumeCoupon(pending.couponUsed, targetId); await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `✅ Confirmado!` }); return; }
         if (id.startsWith("pay_cancel_")) { const targetId = id.replace("pay_cancel_", ""); const pending = await PendingPayment.findOne({ discordId: targetId }); if (!pending) { await interaction.editReply({ content: "❌ Não encontrado." }); return; } await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `🗑️ Cancelado.` }); return; }
+        
+        // Se chegar aqui e for um comando de botão que não foi tratado acima
+        const modalMap = { logs_create: buildModal_create, logs_lifetime: buildModal_lifetime, logs_revoke: buildModal_revoke, logs_pause: buildModal_pause, logs_reset: buildModal_reset, logs_addtime: buildModal_addtime, logs_setexpiry: buildModal_setexpiry, logs_transfer: buildModal_transfer, logs_sethwid: buildModal_sethwid, logs_lookup: buildModal_lookup, logs_unblock: buildModal_unblock, logs_cleanlogs: buildModal_cleanlogs };
+        if (modalMap[id]) {
+            // Se por algum motivo o deferReply foi chamado mas o ID era de um modal, 
+            // não conseguiremos mostrar o modal. Mas isso não deve acontecer pela lógica acima.
+            console.warn(`[LOGS] ID ${id} mapeado para modal mas caiu no fluxo de defer.`);
+        }
     } catch (e) {
         console.error("[LOGS] Erro na interação:", e.message);
         try {

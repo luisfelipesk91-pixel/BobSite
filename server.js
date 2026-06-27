@@ -104,19 +104,6 @@ const clientLogs     = new Client({ intents: [GatewayIntentBits.Guilds, GatewayI
 const clientPanel    = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages], partials: [Partials.Channel, Partials.Message] });
 const clientPayment  = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages], partials: [Partials.Channel, Partials.Message] });
 
-// Prevenção de crash: Capturar erros globais nos clientes Discord
-[clientNotifier, clientLogs, clientPanel, clientPayment].forEach(client => {
-    client.on("error", (err) => console.error(`[DISCORD CLIENT ERROR] ${err.message}`));
-});
-
-process.on("unhandledRejection", (reason, promise) => {
-    console.error("[FATAL] Unhandled Rejection at:", promise, "reason:", reason);
-});
-
-process.on("uncaughtException", (err) => {
-    console.error("[FATAL] Uncaught Exception:", err);
-});
-
 const DEFAULT_PLANS = [
     { label: "1 Hora",   value: "1h",  price: 5,  hours: 1,  emoji: "🕐", active: true },
     { label: "2 Horas",  value: "2h",  price: 10, hours: 2,  emoji: "⏱️", active: true },
@@ -2263,9 +2250,8 @@ async function sendLogsPanel() {
 }
 
 clientLogs.on(Events.InteractionCreate, async (interaction) => {
-    try {
-        if (interaction.isModalSubmit()) { await handleLogsModal(interaction); return; }
-        if (!interaction.isButton()) return;
+    if (interaction.isModalSubmit()) { await handleLogsModal(interaction); return; }
+    if (!interaction.isButton()) return;
     if (!interaction.customId.startsWith("logs_") && !interaction.customId.startsWith("pay_")) return;
     if (!await isAdmin(interaction.member)) { await interaction.reply({ content: "❌ Sem permissão.", ephemeral: true }); return; }
     const id = interaction.customId;
@@ -2413,23 +2399,10 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
     if (id.startsWith("pay_cancel_")) { await interaction.deferReply({ ephemeral: true }); const targetId = id.replace("pay_cancel_", ""); const pending = await PendingPayment.findOne({ discordId: targetId }); if (!pending) { await interaction.editReply({ content: "❌ Não encontrado." }); return; } await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `🗑️ Cancelado.` }); return; }
     const modalMap = { logs_create: buildModal_create, logs_lifetime: buildModal_lifetime, logs_revoke: buildModal_revoke, logs_pause: buildModal_pause, logs_reset: buildModal_reset, logs_addtime: buildModal_addtime, logs_setexpiry: buildModal_setexpiry, logs_transfer: buildModal_transfer, logs_sethwid: buildModal_sethwid, logs_lookup: buildModal_lookup, logs_unblock: buildModal_unblock, logs_cleanlogs: buildModal_cleanlogs };
     if (modalMap[id]) await interaction.showModal(modalMap[id]());
-    } catch (e) {
-        console.error("[LOGS] Erro na interação:", e.message);
-        if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: "❌ Ocorreu um erro ao processar sua solicitação.", ephemeral: true }).catch(() => {});
-        }
-    }
 });
 
 async function handleLogsModal(interaction) {
-    try {
-        await interaction.deferReply({ ephemeral: true });
-    } catch (e) {
-        console.error("[LOGS] Erro ao dar defer no modal:", e.message);
-        return;
-    }
-    
-    try {
+    await interaction.deferReply({ ephemeral: true });
     const id = interaction.customId;
     const getField = (name) => { try { return interaction.fields.getTextInputValue(name); } catch { return ""; } };
     const pass = getField("key_pass");
@@ -2530,12 +2503,6 @@ async function handleLogsModal(interaction) {
     if (id === "modal_approve_deposit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const code = getField("deposit_code").trim().toUpperCase(); const recharge = await Recharge.findOne({ code, status: "pending" }); if (!recharge) { await interaction.editReply({ content: `❌ \`${code}\` não encontrado!` }); return; } const { discordId, discordTag, amount } = recharge; recharge.status = "confirmed"; recharge.confirmedBy = interaction.user.id; await recharge.save(); const user = await User.findOne({ discordId }); if (!user) { await interaction.editReply({ content: "❌ Usuário não encontrado!" }); return; } user.balance += amount; await user.save(); await new Transaction({ discordId, type: "deposit", amount, description: `PIX aprovado (${code})` }).save(); console.log(`[BOBLOGS] Aprovado: ${code} | R$${amount} → ${discordTag}`); const embed = new EmbedBuilder().setColor(COLORS.success).setTitle("✅ Depósito Aprovado").addFields({ name: "Usuário", value: `<@${discordId}>`, inline: true },{ name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },{ name: "Código", value: `\`${code}\``, inline: true },{ name: "Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); try { const userObj = await fetchUserFromAnyClient(discordId); if (userObj) { await userObj.send({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("✅ Depósito Confirmado!").setDescription(`R$${amount.toFixed(2)} aprovado!`).addFields({ name: "Código", value: `\`${code}\``, inline: true },{ name: "Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }).setTimestamp()] }); } } catch (e) { console.error("[BOBLOGS] DM erro:", e.message); } await interaction.editReply({ content: `✅ R$${amount.toFixed(2)} → ${discordTag}!` }); return; }
     if (id === "modal_reject_deposit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const code = getField("deposit_code").trim().toUpperCase(); const reason = getField("reject_reason").trim() || "Sem motivo"; const recharge = await Recharge.findOne({ code, status: "pending" }); if (!recharge) { await interaction.editReply({ content: `❌ \`${code}\` não encontrado!` }); return; } const { discordId, discordTag, amount } = recharge; recharge.status = "cancelled"; await recharge.save(); console.log(`[BOBLOGS] Rejeitado: ${code} | ${reason}`); const embed = new EmbedBuilder().setColor(COLORS.danger).setTitle("❌ Depósito Rejeitado").addFields({ name: "Usuário", value: `<@${discordId}>`, inline: true },{ name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },{ name: "Código", value: `\`${code}\``, inline: true },{ name: "Motivo", value: reason, inline: false }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); try { const userObj = await fetchUserFromAnyClient(discordId); if (userObj) { await userObj.send({ embeds: [new EmbedBuilder().setColor(COLORS.danger).setTitle("❌ Depósito Rejeitado").setDescription(`R$${amount.toFixed(2)} rejeitado.`).addFields({ name: "Motivo", value: reason }).setTimestamp()] }); } } catch (e) { console.error("[BOBLOGS] DM erro:", e.message); } await interaction.editReply({ content: `✅ Rejeitado: \`${code}\`` }); return; }
     // ═══ FIM DOS HANDLERS ═══
-    } catch (e) {
-        console.error("[LOGS] Erro dentro do handleLogsModal:", e.message);
-        try {
-            await interaction.editReply({ content: "❌ Ocorreu um erro interno ao processar o formulário." });
-        } catch {}
-    }
 }
 
 // Funções auxiliares para modais e interações

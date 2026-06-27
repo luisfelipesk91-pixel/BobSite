@@ -35,7 +35,7 @@ const BLOCKED_UA = ["python-requests","python-httpx","curl","wget","httpie","ins
 
 function requireEnv(name) {
     const val = process.env[name];
-    if (!val) { console.error(`[AVISO] Variável não definida: ${name}. O bot continuará rodando, mas algumas funções podem falhar.`); return null; }
+    if (!val) { console.error(`[FATAL] Variável obrigatória não definida: ${name}`); process.exit(1); }
     return val;
 }
 
@@ -115,7 +115,7 @@ let PLANS = [...DEFAULT_PLANS];
 
 mongoose.connect(MONGODB_URI)
     .then(() => { console.log("[DB] MongoDB conectado!"); loadPlansFromDB(); })
-    .catch(e => { console.error("[DB] Erro ao conectar ao MongoDB:", e.message); });
+    .catch(e => { console.error("[DB] Erro fatal:", e.message); process.exit(1); });
 
 const KeySchema = new mongoose.Schema({
     name:      { type: String, required: true, unique: true },
@@ -2250,10 +2250,9 @@ async function sendLogsPanel() {
 }
 
 clientLogs.on(Events.InteractionCreate, async (interaction) => {
-    try {
-        if (interaction.isModalSubmit()) { await handleLogsModal(interaction); return; }
-        if (!interaction.isButton()) return;
-        if (!interaction.customId.startsWith("logs_") && !interaction.customId.startsWith("pay_")) return;
+    if (interaction.isModalSubmit()) { await handleLogsModal(interaction); return; }
+    if (!interaction.isButton()) return;
+    if (!interaction.customId.startsWith("logs_") && !interaction.customId.startsWith("pay_")) return;
     if (!await isAdmin(interaction.member)) { await interaction.reply({ content: "❌ Sem permissão.", ephemeral: true }); return; }
     const id = interaction.customId;
     if (id === "logs_online") { await interaction.deferReply({ ephemeral: false }); const sentMsg = await interaction.editReply({ embeds: [buildOnlineEmbed()] }); startOnlineInterval(interaction.channelId, sentMsg); return; }
@@ -2400,18 +2399,6 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
     if (id.startsWith("pay_cancel_")) { await interaction.deferReply({ ephemeral: true }); const targetId = id.replace("pay_cancel_", ""); const pending = await PendingPayment.findOne({ discordId: targetId }); if (!pending) { await interaction.editReply({ content: "❌ Não encontrado." }); return; } await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `🗑️ Cancelado.` }); return; }
     const modalMap = { logs_create: buildModal_create, logs_lifetime: buildModal_lifetime, logs_revoke: buildModal_revoke, logs_pause: buildModal_pause, logs_reset: buildModal_reset, logs_addtime: buildModal_addtime, logs_setexpiry: buildModal_setexpiry, logs_transfer: buildModal_transfer, logs_sethwid: buildModal_sethwid, logs_lookup: buildModal_lookup, logs_unblock: buildModal_unblock, logs_cleanlogs: buildModal_cleanlogs };
     if (modalMap[id]) await interaction.showModal(modalMap[id]());
-    } catch (e) {
-        console.error("[LOGS INTERACTION ERROR]:", e);
-        try {
-            if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({ content: "❌ Ocorreu um erro ao processar sua solicitação.", ephemeral: true });
-            } else {
-                await interaction.followUp({ content: "❌ Ocorreu um erro ao processar sua solicitação.", ephemeral: true });
-            }
-        } catch (innerError) {
-            console.error("[LOGS INTERACTION ERROR RESPONSE FAILED]:", innerError.message);
-        }
-    }
 });
 
 async function handleLogsModal(interaction) {
@@ -2688,7 +2675,7 @@ if (DISCORD_TOKEN_PAYMENT) clientPayment.login(DISCORD_TOKEN_PAYMENT);
 
 // ─── NOVA ROTA: OBTER PREÇO POR HORA (PÚBLICO) ───────────────────────────────
 // Variável global para o preço por hora (padrão R$2.00)
-let PRICE_PER_HOUR = 7.50;
+let PRICE_PER_HOUR = 2.00;
 
 app.get("/api/price", (req, res) => {
     res.json({ pricePerHour: PRICE_PER_HOUR });
@@ -2954,15 +2941,6 @@ app.post("/api/admin/deposits/reject", requireAdminAuth, async (req, res) => {
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
-});
-
-// Handlers globais para evitar crashes por erros não tratados
-process.on("unhandledRejection", (reason, promise) => {
-    console.error("[ERRO GLOBAL] Unhandled Rejection at:", promise, "reason:", reason);
-});
-
-process.on("uncaughtException", (err) => {
-    console.error("[ERRO GLOBAL] Uncaught Exception thrown:", err);
 });
 
 // Socket.io para atualizações em tempo real

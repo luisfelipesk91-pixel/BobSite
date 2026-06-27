@@ -23,7 +23,7 @@ const RATE_LIMIT_WINDOW  = 60_000;
 const BLOCK_DURATION     = 5  * 60 * 1_000;
 const PENDING_EXPIRY_MS  = 15 * 60 * 1_000;
 const KEY_WARN_BEFORE_MS = 30 * 60 * 1_000;
-const MAX_SLOTS          = parseInt(process.env.MAX_SLOTS || "6");
+const MAX_SLOTS          = parseInt(process.env.MAX_SLOTS || "3");
 
 const COLORS = {
     primary:  0x5865F2, success:  0x00E676, danger:   0xFF3C3C,
@@ -35,7 +35,7 @@ const BLOCKED_UA = ["python-requests","python-httpx","curl","wget","httpie","ins
 
 function requireEnv(name) {
     const val = process.env[name];
-    if (!val) { console.error(`[FATAL] Variável obrigatória não definida: ${name}`); process.exit(1); }
+    if (!val) { console.error(`[AVISO] Variável não definida: ${name}. O bot continuará rodando, mas algumas funções podem falhar.`); return null; }
     return val;
 }
 
@@ -104,19 +104,6 @@ const clientLogs     = new Client({ intents: [GatewayIntentBits.Guilds, GatewayI
 const clientPanel    = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages], partials: [Partials.Channel, Partials.Message] });
 const clientPayment  = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages], partials: [Partials.Channel, Partials.Message] });
 
-// Prevenção de crash: Capturar erros globais nos clientes Discord
-[clientNotifier, clientLogs, clientPanel, clientPayment].forEach(client => {
-    client.on("error", (err) => console.error(`[DISCORD CLIENT ERROR] ${err.message}`));
-});
-
-process.on("unhandledRejection", (reason, promise) => {
-    console.error("[FATAL] Unhandled Rejection at:", promise, "reason:", reason);
-});
-
-process.on("uncaughtException", (err) => {
-    console.error("[FATAL] Uncaught Exception:", err);
-});
-
 const DEFAULT_PLANS = [
     { label: "1 Hora",   value: "1h",  price: 5,  hours: 1,  emoji: "🕐", active: true },
     { label: "2 Horas",  value: "2h",  price: 10, hours: 2,  emoji: "⏱️", active: true },
@@ -128,7 +115,7 @@ let PLANS = [...DEFAULT_PLANS];
 
 mongoose.connect(MONGODB_URI)
     .then(() => { console.log("[DB] MongoDB conectado!"); loadPlansFromDB(); })
-    .catch(e => { console.error("[DB] Erro fatal:", e.message); process.exit(1); });
+    .catch(e => { console.error("[DB] Erro ao conectar ao MongoDB:", e.message); });
 
 const KeySchema = new mongoose.Schema({
     name:      { type: String, required: true, unique: true },
@@ -1326,7 +1313,7 @@ app.post("/api/buy", requireAuth, async (req, res) => {
     }
     
     // Preço: R$2,50 por hora
-    const pricePerHour = 7.50;
+    const pricePerHour = 2.50;
     const totalPrice = hours * pricePerHour;
     
     const user = await User.findOne({ discordId: req.user.discordId });
@@ -2263,55 +2250,77 @@ async function sendLogsPanel() {
 }
 
 clientLogs.on(Events.InteractionCreate, async (interaction) => {
-    try {
-        if (interaction.isModalSubmit()) { await handleLogsModal(interaction); return; }
-        if (!interaction.isButton()) return;
-        if (!interaction.customId.startsWith("logs_") && !interaction.customId.startsWith("pay_")) return;
-
-        // Verifica permissão sem dar reply ainda
-        const hasPerm = await isAdmin(interaction.member);
-        if (!hasPerm) {
-            await interaction.reply({ content: "❌ Sem permissão.", flags: [64] });
-            return;
-        }
-
-        const id = interaction.customId;
-
-        // Modais NÃO podem ter deferReply antes de showModal
-        if (id === "logs_confirmar_manual") { await interaction.showModal(new ModalBuilder().setCustomId("modal_pay_confirm").setTitle("Confirmar Pagamento").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("user_id").setLabel("ID Discord:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("horas").setLabel("Horas:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
-        if (id === "logs_cancelar_pedido") { await interaction.showModal(new ModalBuilder().setCustomId("modal_cancel_pedido").setTitle("Cancelar Pedido").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("user_id").setLabel("ID Discord:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("motivo").setLabel("Motivo:").setStyle(TextInputStyle.Short).setRequired(false)))); return; }
-        if (id === "logs_coupon_create") { await interaction.showModal(new ModalBuilder().setCustomId("modal_coupon_create").setTitle("🎟️ Criar Cupom").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("code").setLabel("Código:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("discount").setLabel("Desconto:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("type").setLabel("Tipo (percent/fixed):").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("maxuses").setLabel("Máx usos:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
-        if (id === "logs_plan_edit") { await interaction.showModal(new ModalBuilder().setCustomId("modal_plan_edit").setTitle("📦 Editar Plano").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("value").setLabel("ID do plano:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("price").setLabel("Preço:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("active").setLabel("Ativo? (sim/nao):").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
-        if (id === "logs_edit_price") { await interaction.showModal(new ModalBuilder().setCustomId("modal_edit_price").setTitle("💰 Editar Preço por Hora").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("new_price").setLabel("Novo preço (ex: 2.50):").setStyle(TextInputStyle.Short).setPlaceholder("7.50").setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
-        if (id === "logs_approve_deposit") { await interaction.showModal(new ModalBuilder().setCustomId("modal_approve_deposit").setTitle("✅ Aprovar Depósito").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("deposit_code").setLabel("Código do depósito (ex: PIX-ABC123):").setStyle(TextInputStyle.Short).setPlaceholder("PIX-ABC123").setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
-        if (id === "logs_reject_deposit") { await interaction.showModal(new ModalBuilder().setCustomId("modal_reject_deposit").setTitle("❌ Rejeitar Depósito").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("deposit_code").setLabel("Código do depósito (ex: PIX-ABC123):").setStyle(TextInputStyle.Short).setPlaceholder("PIX-ABC123").setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("reject_reason").setLabel("Motivo (opcional):").setStyle(TextInputStyle.Short).setPlaceholder("Comprovante inválido").setRequired(false)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
+    if (interaction.isModalSubmit()) { await handleLogsModal(interaction); return; }
+    if (!interaction.isButton()) return;
+    if (!interaction.customId.startsWith("logs_") && !interaction.customId.startsWith("pay_")) return;
+    if (!await isAdmin(interaction.member)) { await interaction.reply({ content: "❌ Sem permissão.", ephemeral: true }); return; }
+    const id = interaction.customId;
+    if (id === "logs_online") { await interaction.deferReply({ ephemeral: false }); const sentMsg = await interaction.editReply({ embeds: [buildOnlineEmbed()] }); startOnlineInterval(interaction.channelId, sentMsg); return; }
+    if (id === "logs_stoponline") { await interaction.deferReply({ ephemeral: true }); stopOnlineInterval(interaction.channelId); await interaction.editReply({ content: "⏹️ Parado." }); return; }
+    if (id === "logs_stats") { await interaction.deferReply({ ephemeral: true }); const all = Object.values(keys).filter(k => !k.isAutoKey || k.remaining > 0), active = all.filter(k => !k.paused && (k.expiry === Infinity || k.expiry - Date.now() > 0)), paused = all.filter(k => k.paused), lt = all.filter(k => k.expiry === Infinity), online = Object.values(presence).filter(p => Date.now() - p.lastSeen < ONLINE_STALE_MS); const pendentes = await PendingPayment.countDocuments(), totalVendas = await SaleHistory.aggregate([{ $group: { _id: null, total: { $sum: "$price" } } }]); await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("📊 Stats").setColor(COLORS.primary).addFields({ name: "🔑 Total", value: `\`${all.length}\``, inline: true },{ name: "✅ Ativas", value: `\`${active.length}\``, inline: true },{ name: "⏸️ Pausadas", value: `\`${paused.length}\``, inline: true },{ name: "♾️ Lifetime", value: `\`${lt.length}\``, inline: true },{ name: "🟢 Online", value: `\`${online.length}\``, inline: true },{ name: "⏳ Pendentes", value: `\`${pendentes}\``, inline: true },{ name: "💰 Receita", value: `\`R$${totalVendas[0]?.total || 0}\``, inline: true }).setTimestamp()] }); return; }
+    if (id === "logs_listkeys") { await interaction.deferReply({ ephemeral: true }); const ks = Object.keys(keys); if (!ks.length) { await interaction.editReply({ content: "Nenhuma key." }); return; } const now = Date.now(); await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("🔑 Keys").setColor(COLORS.primary).setDescription(ks.map(k => { const d = keys[k], t = d.paused ? d.remaining : (d.expiry === Infinity ? Infinity : d.expiry - now); return `• \`${k}\`: \`${formatTime(t)}\` ${d.paused ? "⏸️" : "✅"} ${d.discordId ? `<@${d.discordId}>` : ""}`; }).join("\n").substring(0, 4000)).setTimestamp()] }); return; }
+    if (id === "logs_jobids") { await interaction.deferReply({ ephemeral: true }); const entries = Object.entries(userJobIds); if (!entries.length) { await interaction.editReply({ content: "Nenhum JobID." }); return; } await interaction.editReply({ content: "🎮 **JobIDs:**\n" + entries.map(([n, j]) => `• **${n}**: \`${j}\``).join("\n") }); return; }
+    if (id === "logs_blocked") { await interaction.deferReply({ ephemeral: true }); const now = Date.now(), active = Object.entries(blockedIPs).filter(([, u]) => now < u); if (!active.length) { await interaction.editReply({ content: "Nenhum IP bloqueado." }); return; } await interaction.editReply({ content: "🔒 **IPs:**\n" + active.map(([ip, u]) => `• \`${ip}\` — ${Math.ceil((u - now) / 1000)}s`).join("\n") }); return; }
+    if (id === "logs_pendentes") { await interaction.deferReply({ ephemeral: true }); const pendentes = await PendingPayment.find().sort({ createdAt: -1 }); if (!pendentes.length) { await interaction.editReply({ content: "✅ Nenhum pendente!" }); return; } const now = Date.now(); await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.warning).setTitle(`⏳ Pendentes (${pendentes.length})`).setDescription(pendentes.map(p => { const rem = PENDING_EXPIRY_MS - (now - new Date(p.createdAt).getTime()); return `• **${p.discordTag}** — ${p.label} R$${p.finalPrice || p.price} — ⏳ ${rem > 0 ? formatTimeShort(rem) : "expirando..."}`; }).join("\n")).setTimestamp()] }); return; }
+    if (id === "logs_confirmar_manual") { await interaction.showModal(new ModalBuilder().setCustomId("modal_pay_confirm").setTitle("Confirmar Pagamento").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("user_id").setLabel("ID Discord:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("horas").setLabel("Horas:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
+    if (id === "logs_cancelar_pedido") { await interaction.showModal(new ModalBuilder().setCustomId("modal_cancel_pedido").setTitle("Cancelar Pedido").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("user_id").setLabel("ID Discord:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("motivo").setLabel("Motivo:").setStyle(TextInputStyle.Short).setRequired(false)))); return; }
+    if (id === "logs_vendas") { await interaction.deferReply({ ephemeral: true }); const sales = await SaleHistory.find().sort({ confirmedAt: -1 }), totalR = sales.reduce((a, s) => a + (s.price || 0), 0), hoje = sales.filter(s => new Date(s.confirmedAt).toDateString() === new Date().toDateString()), hojeR = hoje.reduce((a, s) => a + (s.price || 0), 0); await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("💰 Vendas").addFields({ name: "📦 Total", value: `\`${sales.length}\``, inline: true },{ name: "💰 Receita", value: `\`R$${totalR}\``, inline: true },{ name: "📅 Hoje", value: `\`${hoje.length}\``, inline: true },{ name: "💵 Hoje R$", value: `\`R$${hojeR}\``, inline: true }).setTimestamp()] }); return; }
+    if (id === "logs_historico") { await interaction.deferReply({ ephemeral: true }); const sales = await SaleHistory.find().sort({ confirmedAt: -1 }).limit(20); if (!sales.length) { await interaction.editReply({ content: "Nenhuma venda." }); return; } await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("📜 Histórico").setDescription(sales.map(s => `• <@${s.discordId}> — **${s.label}** R$${s.price} — \`${s.keyName}\` — ${tsRelative(s.confirmedAt)}`).join("\n").substring(0, 4000)).setTimestamp()] }); return; }
+    if (id === "logs_coupon_create") { await interaction.showModal(new ModalBuilder().setCustomId("modal_coupon_create").setTitle("🎟️ Criar Cupom").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("code").setLabel("Código:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("discount").setLabel("Desconto:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("type").setLabel("Tipo (percent/fixed):").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("maxuses").setLabel("Máx usos:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
+    if (id === "logs_coupon_list") { await interaction.deferReply({ ephemeral: true }); const coupons = await Coupon.find({ active: true }); if (!coupons.length) { await interaction.editReply({ content: "Nenhum cupom." }); return; } await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.gold).setTitle("🎟️ Cupons").setDescription(coupons.map(c => `• \`${c.code}\` — **${c.discount}${c.type === "percent" ? "%" : " R$"}** — ${c.usedCount}/${c.maxUses}`).join("\n")).setTimestamp()] }); return; }
+    if (id === "logs_plan_edit") { await interaction.showModal(new ModalBuilder().setCustomId("modal_plan_edit").setTitle("📦 Editar Plano").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("value").setLabel("ID do plano:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("price").setLabel("Preço:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("active").setLabel("Ativo? (sim/nao):").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
+    
+    // ═══ NOVOS BOTÕES: EDITAR PREÇO E APROVAR DEPÓSITOS ═══
+    if (id === "logs_view_price") { 
+        await interaction.deferReply({ ephemeral: true }); 
+        await interaction.editReply({ 
+            embeds: [new EmbedBuilder()
+                .setColor(COLORS.primary)
+                .setTitle("💰 Preço Atual")
+                .setDescription(`**R$${PRICE_PER_HOUR.toFixed(2)}** por hora`)
+                .setTimestamp()
+            ] 
+        }); 
+        return; 
+    }
+    
+    if (id === "logs_edit_price") { 
+        await interaction.showModal(new ModalBuilder()
+            .setCustomId("modal_edit_price")
+            .setTitle("💰 Editar Preço por Hora")
+            .addComponents(
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("new_price")
+                        .setLabel("Novo preço (ex: 2.50):")
+                        .setStyle(TextInputStyle.Short)
+                        .setPlaceholder("2.00")
+                        .setRequired(true)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("key_pass")
+                        .setLabel("Senha:")
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                )
+            )
+        ); 
+        return; 
+    }
+    
+    if (id === "logs_deposits_pending") { 
+        await interaction.deferReply({ ephemeral: true }); 
+        const pending = await Recharge.find({ status: "pending" }).sort({ createdAt: -1 }); 
         
-        const modalMap = { logs_create: buildModal_create, logs_lifetime: buildModal_lifetime, logs_revoke: buildModal_revoke, logs_pause: buildModal_pause, logs_reset: buildModal_reset, logs_addtime: buildModal_addtime, logs_setexpiry: buildModal_setexpiry, logs_transfer: buildModal_transfer, logs_sethwid: buildModal_sethwid, logs_lookup: buildModal_lookup, logs_unblock: buildModal_unblock, logs_cleanlogs: buildModal_cleanlogs };
-        if (modalMap[id]) { await interaction.showModal(modalMap[id]()); return; }
-
-        // Comandos que NÃO são modais levam deferReply
-        try {
-            await interaction.deferReply({ flags: [64] });
-        } catch (e) {
-            console.error("[LOGS] Erro ao dar defer:", e.message);
-            return;
-        }
-
-        if (id === "logs_online") { const sentMsg = await interaction.editReply({ embeds: [buildOnlineEmbed()] }); startOnlineInterval(interaction.channelId, sentMsg); return; }
-        if (id === "logs_stoponline") { stopOnlineInterval(interaction.channelId); await interaction.editReply({ content: "⏹️ Parado." }); return; }
-        if (id === "logs_stats") { const all = Object.values(keys).filter(k => !k.isAutoKey || k.remaining > 0), active = all.filter(k => !k.paused && (k.expiry === Infinity || k.expiry - Date.now() > 0)), paused = all.filter(k => k.paused), lt = all.filter(k => k.expiry === Infinity), online = Object.values(presence).filter(p => Date.now() - p.lastSeen < ONLINE_STALE_MS); const pendentes = await PendingPayment.countDocuments(), totalVendas = await SaleHistory.aggregate([{ $group: { _id: null, total: { $sum: "$price" } } }]); await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("📊 Stats").setColor(COLORS.primary).addFields({ name: "🔑 Total", value: `\`${all.length}\``, inline: true },{ name: "✅ Ativas", value: `\`${active.length}\``, inline: true },{ name: "⏸️ Pausadas", value: `\`${paused.length}\``, inline: true },{ name: "♾️ Lifetime", value: `\`${lt.length}\``, inline: true },{ name: "🟢 Online", value: `\`${online.length}\``, inline: true },{ name: "⏳ Pendentes", value: `\`${pendentes}\``, inline: true },{ name: "💰 Receita", value: `\`R$${totalVendas[0]?.total || 0}\``, inline: true }).setTimestamp()] }); return; }
-        if (id === "logs_listkeys") { const ks = Object.keys(keys); if (!ks.length) { await interaction.editReply({ content: "Nenhuma key." }); return; } const now = Date.now(); await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("🔑 Keys").setColor(COLORS.primary).setDescription(ks.map(k => { const d = keys[k], t = d.paused ? d.remaining : (d.expiry === Infinity ? Infinity : d.expiry - now); return `• \`${k}\`: \`${formatTime(t)}\` ${d.paused ? "⏸️" : "✅"} ${d.discordId ? `<@${d.discordId}>` : ""}`; }).join("\n").substring(0, 4000)).setTimestamp()] }); return; }
-        if (id === "logs_jobids") { const entries = Object.entries(userJobIds); if (!entries.length) { await interaction.editReply({ content: "Nenhum JobID." }); return; } await interaction.editReply({ content: "🎮 **JobIDs:**\n" + entries.map(([n, j]) => `• **${n}**: \`${j}\``).join("\n") }); return; }
-        if (id === "logs_blocked") { const now = Date.now(), active = Object.entries(blockedIPs).filter(([, u]) => now < u); if (!active.length) { await interaction.editReply({ content: "Nenhum IP bloqueado." }); return; } await interaction.editReply({ content: "🔒 **IPs:**\n" + active.map(([ip, u]) => `• \`${ip}\` — ${Math.ceil((u - now) / 1000)}s`).join("\n") }); return; }
-        if (id === "logs_pendentes") { const pendentes = await PendingPayment.find().sort({ createdAt: -1 }); if (!pendentes.length) { await interaction.editReply({ content: "✅ Nenhum pendente!" }); return; } const now = Date.now(); await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.warning).setTitle(`⏳ Pendentes (${pendentes.length})`).setDescription(pendentes.map(p => { const rem = PENDING_EXPIRY_MS - (now - new Date(p.createdAt).getTime()); return `• **${p.discordTag}** — ${p.label} R$${p.finalPrice || p.price} — ⏳ ${rem > 0 ? formatTimeShort(rem) : "expirando..."}`; }).join("\n")).setTimestamp()] }); return; }
-        if (id === "logs_vendas") { const sales = await SaleHistory.find().sort({ confirmedAt: -1 }), totalR = sales.reduce((a, s) => a + (s.price || 0), 0), hoje = sales.filter(s => new Date(s.confirmedAt).toDateString() === new Date().toDateString()), hojeR = hoje.reduce((a, s) => a + (s.price || 0), 0); await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("💰 Vendas").addFields({ name: "📦 Total", value: `\`${sales.length}\``, inline: true },{ name: "💰 Receita", value: `\`R$${totalR}\``, inline: true },{ name: "📅 Hoje", value: `\`${hoje.length}\``, inline: true },{ name: "💵 Hoje R$", value: `\`R$${hojeR}\``, inline: true }).setTimestamp()] }); return; }
-        if (id === "logs_historico") { const sales = await SaleHistory.find().sort({ confirmedAt: -1 }).limit(20); if (!sales.length) { await interaction.editReply({ content: "Nenhuma venda." }); return; } await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("📜 Histórico").setDescription(sales.map(s => `• <@${s.discordId}> — **${s.label}** R$${s.price} — \`${s.keyName}\` — ${tsRelative(s.confirmedAt)}`).join("\n").substring(0, 4000)).setTimestamp()] }); return; }
-        if (id === "logs_coupon_list") { const coupons = await Coupon.find({ active: true }); if (!coupons.length) { await interaction.editReply({ content: "Nenhum cupom." }); return; } await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.gold).setTitle("🎟️ Cupons").setDescription(coupons.map(c => `• \`${c.code}\` — **${c.discount}${c.type === "percent" ? "%" : " R$"}** — ${c.usedCount}/${c.maxUses}`).join("\n")).setTimestamp()] }); return; }
-        if (id === "logs_view_price") { await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.primary).setTitle("💰 Preço Atual").setDescription(`**R$${PRICE_PER_HOUR.toFixed(2)}** por hora`).setTimestamp()] }); return; }
-        if (id === "logs_deposits_pending") { 
-            const pending = await Recharge.find({ status: "pending" }).sort({ createdAt: -1 }); 
-            if (!pending.length) { await interaction.editReply({ content: "✅ Nenhum depósito pendente!" }); return; } 
-            const embed = new EmbedBuilder().setColor(COLORS.warning).setTitle(`📥 Depósitos Pendentes (${pending.length})`)
+        if (!pending.length) { 
+            await interaction.editReply({ content: "✅ Nenhum depósito pendente!" }); 
+            return; 
+        } 
+        
+        const embed = new EmbedBuilder()
+            .setColor(COLORS.warning)
+            .setTitle(`📥 Depósitos Pendentes (${pending.length})`)
             .setTimestamp();
         
         let description = "";
@@ -2386,38 +2395,14 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
         return; 
     }
     // ═══ FIM DOS NOVOS BOTÕES ═══
-        if (id.startsWith("pay_confirm_")) { const parts = id.split("_"), targetId = parts[2], hours = parseInt(parts[3]); const pending = await PendingPayment.findOne({ discordId: targetId }); const target = await fetchUserFromAnyClient(targetId); if (!target) { await interaction.editReply({ content: "❌ Não encontrado!" }); return; } await confirmarPagamento(target, hours, interaction.channel, interaction.user.id, pending?.finalPrice || pending?.price, pending?.label, pending?.couponUsed); if (pending?.couponUsed) await consumeCoupon(pending.couponUsed, targetId); await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `✅ Confirmado!` }); return; }
-        if (id.startsWith("pay_cancel_")) { const targetId = id.replace("pay_cancel_", ""); const pending = await PendingPayment.findOne({ discordId: targetId }); if (!pending) { await interaction.editReply({ content: "❌ Não encontrado." }); return; } await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `🗑️ Cancelado.` }); return; }
-        
-        // Se chegar aqui e for um comando de botão que não foi tratado acima
-        const modalMap = { logs_create: buildModal_create, logs_lifetime: buildModal_lifetime, logs_revoke: buildModal_revoke, logs_pause: buildModal_pause, logs_reset: buildModal_reset, logs_addtime: buildModal_addtime, logs_setexpiry: buildModal_setexpiry, logs_transfer: buildModal_transfer, logs_sethwid: buildModal_sethwid, logs_lookup: buildModal_lookup, logs_unblock: buildModal_unblock, logs_cleanlogs: buildModal_cleanlogs };
-        if (modalMap[id]) {
-            // Se por algum motivo o deferReply foi chamado mas o ID era de um modal, 
-            // não conseguiremos mostrar o modal. Mas isso não deve acontecer pela lógica acima.
-            console.warn(`[LOGS] ID ${id} mapeado para modal mas caiu no fluxo de defer.`);
-        }
-    } catch (e) {
-        console.error("[LOGS] Erro na interação:", e.message);
-        try {
-            if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({ content: "❌ Ocorreu um erro ao processar sua solicitação.", flags: [64] });
-            } else if (interaction.deferred) {
-                await interaction.editReply({ content: "❌ Ocorreu um erro ao processar sua solicitação." });
-            }
-        } catch {}
-    }
+    if (id.startsWith("pay_confirm_")) { await interaction.deferReply({ ephemeral: true }); const parts = id.split("_"), targetId = parts[2], hours = parseInt(parts[3]); const pending = await PendingPayment.findOne({ discordId: targetId }); const target = await fetchUserFromAnyClient(targetId); if (!target) { await interaction.editReply({ content: "❌ Não encontrado!" }); return; } await confirmarPagamento(target, hours, interaction.channel, interaction.user.id, pending?.finalPrice || pending?.price, pending?.label, pending?.couponUsed); if (pending?.couponUsed) await consumeCoupon(pending.couponUsed, targetId); await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `✅ Confirmado!` }); return; }
+    if (id.startsWith("pay_cancel_")) { await interaction.deferReply({ ephemeral: true }); const targetId = id.replace("pay_cancel_", ""); const pending = await PendingPayment.findOne({ discordId: targetId }); if (!pending) { await interaction.editReply({ content: "❌ Não encontrado." }); return; } await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `🗑️ Cancelado.` }); return; }
+    const modalMap = { logs_create: buildModal_create, logs_lifetime: buildModal_lifetime, logs_revoke: buildModal_revoke, logs_pause: buildModal_pause, logs_reset: buildModal_reset, logs_addtime: buildModal_addtime, logs_setexpiry: buildModal_setexpiry, logs_transfer: buildModal_transfer, logs_sethwid: buildModal_sethwid, logs_lookup: buildModal_lookup, logs_unblock: buildModal_unblock, logs_cleanlogs: buildModal_cleanlogs };
+    if (modalMap[id]) await interaction.showModal(modalMap[id]());
 });
 
 async function handleLogsModal(interaction) {
-    try {
-        if (!interaction.replied && !interaction.deferred) {
-            await interaction.deferReply({ flags: [64] }).catch(() => {});
-        }
-    } catch (e) {
-        console.error("[LOGS] Erro ao dar defer no modal:", e.message);
-    }
-    
-    try {
+    await interaction.deferReply({ ephemeral: true });
     const id = interaction.customId;
     const getField = (name) => { try { return interaction.fields.getTextInputValue(name); } catch { return ""; } };
     const pass = getField("key_pass");
@@ -2518,12 +2503,6 @@ async function handleLogsModal(interaction) {
     if (id === "modal_approve_deposit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const code = getField("deposit_code").trim().toUpperCase(); const recharge = await Recharge.findOne({ code, status: "pending" }); if (!recharge) { await interaction.editReply({ content: `❌ \`${code}\` não encontrado!` }); return; } const { discordId, discordTag, amount } = recharge; recharge.status = "confirmed"; recharge.confirmedBy = interaction.user.id; await recharge.save(); const user = await User.findOne({ discordId }); if (!user) { await interaction.editReply({ content: "❌ Usuário não encontrado!" }); return; } user.balance += amount; await user.save(); await new Transaction({ discordId, type: "deposit", amount, description: `PIX aprovado (${code})` }).save(); console.log(`[BOBLOGS] Aprovado: ${code} | R$${amount} → ${discordTag}`); const embed = new EmbedBuilder().setColor(COLORS.success).setTitle("✅ Depósito Aprovado").addFields({ name: "Usuário", value: `<@${discordId}>`, inline: true },{ name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },{ name: "Código", value: `\`${code}\``, inline: true },{ name: "Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); try { const userObj = await fetchUserFromAnyClient(discordId); if (userObj) { await userObj.send({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("✅ Depósito Confirmado!").setDescription(`R$${amount.toFixed(2)} aprovado!`).addFields({ name: "Código", value: `\`${code}\``, inline: true },{ name: "Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }).setTimestamp()] }); } } catch (e) { console.error("[BOBLOGS] DM erro:", e.message); } await interaction.editReply({ content: `✅ R$${amount.toFixed(2)} → ${discordTag}!` }); return; }
     if (id === "modal_reject_deposit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const code = getField("deposit_code").trim().toUpperCase(); const reason = getField("reject_reason").trim() || "Sem motivo"; const recharge = await Recharge.findOne({ code, status: "pending" }); if (!recharge) { await interaction.editReply({ content: `❌ \`${code}\` não encontrado!` }); return; } const { discordId, discordTag, amount } = recharge; recharge.status = "cancelled"; await recharge.save(); console.log(`[BOBLOGS] Rejeitado: ${code} | ${reason}`); const embed = new EmbedBuilder().setColor(COLORS.danger).setTitle("❌ Depósito Rejeitado").addFields({ name: "Usuário", value: `<@${discordId}>`, inline: true },{ name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },{ name: "Código", value: `\`${code}\``, inline: true },{ name: "Motivo", value: reason, inline: false }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); try { const userObj = await fetchUserFromAnyClient(discordId); if (userObj) { await userObj.send({ embeds: [new EmbedBuilder().setColor(COLORS.danger).setTitle("❌ Depósito Rejeitado").setDescription(`R$${amount.toFixed(2)} rejeitado.`).addFields({ name: "Motivo", value: reason }).setTimestamp()] }); } } catch (e) { console.error("[BOBLOGS] DM erro:", e.message); } await interaction.editReply({ content: `✅ Rejeitado: \`${code}\`` }); return; }
     // ═══ FIM DOS HANDLERS ═══
-    } catch (e) {
-        console.error("[LOGS] Erro dentro do handleLogsModal:", e.message);
-        try {
-            await interaction.editReply({ content: "❌ Ocorreu um erro interno ao processar o formulário." });
-        } catch {}
-    }
 }
 
 // Funções auxiliares para modais e interações
@@ -2652,8 +2631,8 @@ clientPayment.on(Events.InteractionCreate, async (interaction) => {
     const id = interaction.customId, user = interaction.user;
     if (interaction.isModalSubmit() && id === "modal_cupom") { await interaction.deferReply({ ephemeral: true }); const planValue = pendingCoupon[user.id]?.plan, couponCode = interaction.fields.getTextInputValue("coupon_code").trim().toUpperCase(); const plan = getActivePlans().find(p => p.value === planValue); if (!plan) { await interaction.editReply({ content: "❌ Sessão expirada." }); return; } const result = await applyCoupon(couponCode, user.id, plan.price); if (!result.ok) { await interaction.editReply({ content: result.msg }); return; } pendingCoupon[user.id] = { plan: planValue, coupon: couponCode, finalPrice: result.finalPrice }; await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("🎟️ Cupom Aplicado!").setDescription(`**${couponCode}** — ${result.discount}${result.type === "percent" ? "%" : " R$"} off\n**Preço final: R$${result.finalPrice}**`).setTimestamp()] }); return; }
     if (!interaction.isButton()) return;
-    if (id === "buy_cupom") { await interaction.showModal(new ModalBuilder().setCustomId("modal_cupom").setTitle("🎟️ Cupom").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("coupon_code").setLabel("Código:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
-    await interaction.deferReply({ flags: [64] }).catch(() => {});
+    await interaction.deferReply({ ephemeral: true });
+    if (id === "buy_cupom") { await interaction.deleteReply().catch(() => {}); await interaction.showModal(new ModalBuilder().setCustomId("modal_cupom").setTitle("🎟️ Cupom").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("coupon_code").setLabel("Código:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
     if (id.startsWith("buy_") && id !== "buy_minhakey") { const planValue = id.replace("buy_", ""), plan = getActivePlans().find(p => p.value === planValue); if (!plan) { await interaction.editReply({ content: "❌ Plano inválido!" }); return; } const existing = await PendingPayment.findOne({ discordId: user.id }); const now = Date.now(); if (existing) { const rem = PENDING_EXPIRY_MS - (now - new Date(existing.createdAt).getTime()); if (rem > 0) { await interaction.editReply({ content: `⚠️ Pedido ativo! Expira em **${formatTimeShort(rem)}**.` }); return; } } const couponData = pendingCoupon[user.id]?.plan === planValue ? pendingCoupon[user.id] : null; let finalPrice = plan.price, couponUsed = null; if (couponData) { finalPrice = couponData.finalPrice; couponUsed = couponData.coupon; delete pendingCoupon[user.id]; } await PendingPayment.findOneAndUpdate({ discordId: user.id }, { discordId: user.id, discordTag: user.tag, hours: plan.hours, price: plan.price, finalPrice, label: plan.label, couponUsed, warningSent: false, createdAt: new Date() }, { upsert: true, new: true }); await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.info).setTitle("💳 Pix").setDescription(`**${plan.emoji} ${plan.label}** — R$${finalPrice},00\n\n**Chave Pix:**\n\`\`\`${PIX_KEY}\`\`\`**Nome:** ${PIX_NAME}\n\n> Envie o comprovante aqui!\n> ⏳ **15 minutos** para pagar.`).setTimestamp()] }); return; }
     if (id === "buy_minhakey") { const userKeys = Object.entries(keys).filter(([, d]) => d.discordId === user.id); if (!userKeys.length) { await interaction.editReply({ content: "❌ Nenhuma key!" }); return; } const now = Date.now(); await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("🔑 Suas Keys").setDescription(userKeys.map(([k, d]) => `\`${k}\` — ${d.expiry === Infinity ? "Lifetime ♾️" : (d.expiry - now > 0 ? formatTime(d.expiry - now) : "❌")} ${d.paused ? "⏸️" : "✅"}`).join("\n")).setTimestamp()] }); return; }
 
@@ -2695,7 +2674,7 @@ if (DISCORD_TOKEN_PANEL) clientPanel.login(DISCORD_TOKEN_PANEL);
 if (DISCORD_TOKEN_PAYMENT) clientPayment.login(DISCORD_TOKEN_PAYMENT);
 
 // ─── NOVA ROTA: OBTER PREÇO POR HORA (PÚBLICO) ───────────────────────────────
-// Variável global para o preço por hora (padrão R$7.50)
+// Variável global para o preço por hora (padrão R$2.00)
 let PRICE_PER_HOUR = 7.50;
 
 app.get("/api/price", (req, res) => {

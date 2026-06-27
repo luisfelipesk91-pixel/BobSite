@@ -23,7 +23,7 @@ const RATE_LIMIT_WINDOW  = 60_000;
 const BLOCK_DURATION     = 5  * 60 * 1_000;
 const PENDING_EXPIRY_MS  = 15 * 60 * 1_000;
 const KEY_WARN_BEFORE_MS = 30 * 60 * 1_000;
-const MAX_SLOTS          = parseInt(process.env.MAX_SLOTS || "3");
+const MAX_SLOTS          = parseInt(process.env.MAX_SLOTS || "6");
 
 const COLORS = {
     primary:  0x5865F2, success:  0x00E676, danger:   0xFF3C3C,
@@ -35,7 +35,7 @@ const BLOCKED_UA = ["python-requests","python-httpx","curl","wget","httpie","ins
 
 function requireEnv(name) {
     const val = process.env[name];
-    if (!val) { console.error(`[AVISO] Variável não definida: ${name}. O bot continuará rodando, mas algumas funções podem falhar.`); return null; }
+    if (!val) { console.error(`[FATAL] Variável obrigatória não definida: ${name}`); process.exit(1); }
     return val;
 }
 
@@ -104,6 +104,19 @@ const clientLogs     = new Client({ intents: [GatewayIntentBits.Guilds, GatewayI
 const clientPanel    = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages], partials: [Partials.Channel, Partials.Message] });
 const clientPayment  = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages], partials: [Partials.Channel, Partials.Message] });
 
+// Prevenção de crash: Capturar erros globais nos clientes Discord
+[clientNotifier, clientLogs, clientPanel, clientPayment].forEach(client => {
+    client.on("error", (err) => console.error(`[DISCORD CLIENT ERROR] ${err.message}`));
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+    console.error("[FATAL] Unhandled Rejection at:", promise, "reason:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+    console.error("[FATAL] Uncaught Exception:", err);
+});
+
 const DEFAULT_PLANS = [
     { label: "1 Hora",   value: "1h",  price: 5,  hours: 1,  emoji: "🕐", active: true },
     { label: "2 Horas",  value: "2h",  price: 10, hours: 2,  emoji: "⏱️", active: true },
@@ -115,7 +128,7 @@ let PLANS = [...DEFAULT_PLANS];
 
 mongoose.connect(MONGODB_URI)
     .then(() => { console.log("[DB] MongoDB conectado!"); loadPlansFromDB(); })
-    .catch(e => { console.error("[DB] Erro ao conectar ao MongoDB:", e.message); });
+    .catch(e => { console.error("[DB] Erro fatal:", e.message); process.exit(1); });
 
 const KeySchema = new mongoose.Schema({
     name:      { type: String, required: true, unique: true },
@@ -1313,7 +1326,7 @@ app.post("/api/buy", requireAuth, async (req, res) => {
     }
     
     // Preço: R$2,50 por hora
-    const pricePerHour = 2.50;
+    const pricePerHour = 7.50;
     const totalPrice = hours * pricePerHour;
     
     const user = await User.findOne({ discordId: req.user.discordId });
@@ -2250,8 +2263,9 @@ async function sendLogsPanel() {
 }
 
 clientLogs.on(Events.InteractionCreate, async (interaction) => {
-    if (interaction.isModalSubmit()) { await handleLogsModal(interaction); return; }
-    if (!interaction.isButton()) return;
+    try {
+        if (interaction.isModalSubmit()) { await handleLogsModal(interaction); return; }
+        if (!interaction.isButton()) return;
     if (!interaction.customId.startsWith("logs_") && !interaction.customId.startsWith("pay_")) return;
     if (!await isAdmin(interaction.member)) { await interaction.reply({ content: "❌ Sem permissão.", ephemeral: true }); return; }
     const id = interaction.customId;
@@ -2399,10 +2413,23 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
     if (id.startsWith("pay_cancel_")) { await interaction.deferReply({ ephemeral: true }); const targetId = id.replace("pay_cancel_", ""); const pending = await PendingPayment.findOne({ discordId: targetId }); if (!pending) { await interaction.editReply({ content: "❌ Não encontrado." }); return; } await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `🗑️ Cancelado.` }); return; }
     const modalMap = { logs_create: buildModal_create, logs_lifetime: buildModal_lifetime, logs_revoke: buildModal_revoke, logs_pause: buildModal_pause, logs_reset: buildModal_reset, logs_addtime: buildModal_addtime, logs_setexpiry: buildModal_setexpiry, logs_transfer: buildModal_transfer, logs_sethwid: buildModal_sethwid, logs_lookup: buildModal_lookup, logs_unblock: buildModal_unblock, logs_cleanlogs: buildModal_cleanlogs };
     if (modalMap[id]) await interaction.showModal(modalMap[id]());
+    } catch (e) {
+        console.error("[LOGS] Erro na interação:", e.message);
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: "❌ Ocorreu um erro ao processar sua solicitação.", ephemeral: true }).catch(() => {});
+        }
+    }
 });
 
 async function handleLogsModal(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    try {
+        await interaction.deferReply({ ephemeral: true });
+    } catch (e) {
+        console.error("[LOGS] Erro ao dar defer no modal:", e.message);
+        return;
+    }
+    
+    try {
     const id = interaction.customId;
     const getField = (name) => { try { return interaction.fields.getTextInputValue(name); } catch { return ""; } };
     const pass = getField("key_pass");
@@ -2503,6 +2530,12 @@ async function handleLogsModal(interaction) {
     if (id === "modal_approve_deposit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const code = getField("deposit_code").trim().toUpperCase(); const recharge = await Recharge.findOne({ code, status: "pending" }); if (!recharge) { await interaction.editReply({ content: `❌ \`${code}\` não encontrado!` }); return; } const { discordId, discordTag, amount } = recharge; recharge.status = "confirmed"; recharge.confirmedBy = interaction.user.id; await recharge.save(); const user = await User.findOne({ discordId }); if (!user) { await interaction.editReply({ content: "❌ Usuário não encontrado!" }); return; } user.balance += amount; await user.save(); await new Transaction({ discordId, type: "deposit", amount, description: `PIX aprovado (${code})` }).save(); console.log(`[BOBLOGS] Aprovado: ${code} | R$${amount} → ${discordTag}`); const embed = new EmbedBuilder().setColor(COLORS.success).setTitle("✅ Depósito Aprovado").addFields({ name: "Usuário", value: `<@${discordId}>`, inline: true },{ name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },{ name: "Código", value: `\`${code}\``, inline: true },{ name: "Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); try { const userObj = await fetchUserFromAnyClient(discordId); if (userObj) { await userObj.send({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("✅ Depósito Confirmado!").setDescription(`R$${amount.toFixed(2)} aprovado!`).addFields({ name: "Código", value: `\`${code}\``, inline: true },{ name: "Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }).setTimestamp()] }); } } catch (e) { console.error("[BOBLOGS] DM erro:", e.message); } await interaction.editReply({ content: `✅ R$${amount.toFixed(2)} → ${discordTag}!` }); return; }
     if (id === "modal_reject_deposit") { if (wrongPass(getField("key_pass"))) { await interaction.editReply({ content: "❌ Senha incorreta!" }); return; } const code = getField("deposit_code").trim().toUpperCase(); const reason = getField("reject_reason").trim() || "Sem motivo"; const recharge = await Recharge.findOne({ code, status: "pending" }); if (!recharge) { await interaction.editReply({ content: `❌ \`${code}\` não encontrado!` }); return; } const { discordId, discordTag, amount } = recharge; recharge.status = "cancelled"; await recharge.save(); console.log(`[BOBLOGS] Rejeitado: ${code} | ${reason}`); const embed = new EmbedBuilder().setColor(COLORS.danger).setTitle("❌ Depósito Rejeitado").addFields({ name: "Usuário", value: `<@${discordId}>`, inline: true },{ name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },{ name: "Código", value: `\`${code}\``, inline: true },{ name: "Motivo", value: reason, inline: false }).setTimestamp(); await interaction.channel.send({ embeds: [embed] }); try { const userObj = await fetchUserFromAnyClient(discordId); if (userObj) { await userObj.send({ embeds: [new EmbedBuilder().setColor(COLORS.danger).setTitle("❌ Depósito Rejeitado").setDescription(`R$${amount.toFixed(2)} rejeitado.`).addFields({ name: "Motivo", value: reason }).setTimestamp()] }); } } catch (e) { console.error("[BOBLOGS] DM erro:", e.message); } await interaction.editReply({ content: `✅ Rejeitado: \`${code}\`` }); return; }
     // ═══ FIM DOS HANDLERS ═══
+    } catch (e) {
+        console.error("[LOGS] Erro dentro do handleLogsModal:", e.message);
+        try {
+            await interaction.editReply({ content: "❌ Ocorreu um erro interno ao processar o formulário." });
+        } catch {}
+    }
 }
 
 // Funções auxiliares para modais e interações
@@ -2675,7 +2708,7 @@ if (DISCORD_TOKEN_PAYMENT) clientPayment.login(DISCORD_TOKEN_PAYMENT);
 
 // ─── NOVA ROTA: OBTER PREÇO POR HORA (PÚBLICO) ───────────────────────────────
 // Variável global para o preço por hora (padrão R$2.00)
-let PRICE_PER_HOUR = 7.50;
+let PRICE_PER_HOUR = 2.00;
 
 app.get("/api/price", (req, res) => {
     res.json({ pricePerHour: PRICE_PER_HOUR });

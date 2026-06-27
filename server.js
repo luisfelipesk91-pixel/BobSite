@@ -35,7 +35,7 @@ const BLOCKED_UA = ["python-requests","python-httpx","curl","wget","httpie","ins
 
 function requireEnv(name) {
     const val = process.env[name];
-    if (!val) { console.error(`[FATAL] Variável obrigatória não definida: ${name}`); process.exit(1); }
+    if (!val) { console.error(`[AVISO] Variável não definida: ${name}. O bot continuará rodando, mas algumas funções podem falhar.`); return null; }
     return val;
 }
 
@@ -115,7 +115,7 @@ let PLANS = [...DEFAULT_PLANS];
 
 mongoose.connect(MONGODB_URI)
     .then(() => { console.log("[DB] MongoDB conectado!"); loadPlansFromDB(); })
-    .catch(e => { console.error("[DB] Erro fatal:", e.message); process.exit(1); });
+    .catch(e => { console.error("[DB] Erro ao conectar ao MongoDB:", e.message); });
 
 const KeySchema = new mongoose.Schema({
     name:      { type: String, required: true, unique: true },
@@ -2250,23 +2250,131 @@ async function sendLogsPanel() {
 }
 
 clientLogs.on(Events.InteractionCreate, async (interaction) => {
-    if (interaction.isModalSubmit()) { await handleLogsModal(interaction); return; }
-    if (!interaction.isButton()) return;
-    if (!interaction.customId.startsWith("logs_") && !interaction.customId.startsWith("pay_")) return;
-    if (!await isAdmin(interaction.member)) { await interaction.reply({ content: "❌ Sem permissão.", ephemeral: true }); return; }
-    const id = interaction.customId;
-    if (id === "logs_online") { await interaction.deferReply({ ephemeral: false }); const sentMsg = await interaction.editReply({ embeds: [buildOnlineEmbed()] }); startOnlineInterval(interaction.channelId, sentMsg); return; }
-    if (id === "logs_stoponline") { await interaction.deferReply({ ephemeral: true }); stopOnlineInterval(interaction.channelId); await interaction.editReply({ content: "⏹️ Parado." }); return; }
-    if (id === "logs_stats") { await interaction.deferReply({ ephemeral: true }); const all = Object.values(keys).filter(k => !k.isAutoKey || k.remaining > 0), active = all.filter(k => !k.paused && (k.expiry === Infinity || k.expiry - Date.now() > 0)), paused = all.filter(k => k.paused), lt = all.filter(k => k.expiry === Infinity), online = Object.values(presence).filter(p => Date.now() - p.lastSeen < ONLINE_STALE_MS); const pendentes = await PendingPayment.countDocuments(), totalVendas = await SaleHistory.aggregate([{ $group: { _id: null, total: { $sum: "$price" } } }]); await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("📊 Stats").setColor(COLORS.primary).addFields({ name: "🔑 Total", value: `\`${all.length}\``, inline: true },{ name: "✅ Ativas", value: `\`${active.length}\``, inline: true },{ name: "⏸️ Pausadas", value: `\`${paused.length}\``, inline: true },{ name: "♾️ Lifetime", value: `\`${lt.length}\``, inline: true },{ name: "🟢 Online", value: `\`${online.length}\``, inline: true },{ name: "⏳ Pendentes", value: `\`${pendentes}\``, inline: true },{ name: "💰 Receita", value: `\`R$${totalVendas[0]?.total || 0}\``, inline: true }).setTimestamp()] }); return; }
-    if (id === "logs_listkeys") { await interaction.deferReply({ ephemeral: true }); const ks = Object.keys(keys); if (!ks.length) { await interaction.editReply({ content: "Nenhuma key." }); return; } const now = Date.now(); await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("🔑 Keys").setColor(COLORS.primary).setDescription(ks.map(k => { const d = keys[k], t = d.paused ? d.remaining : (d.expiry === Infinity ? Infinity : d.expiry - now); return `• \`${k}\`: \`${formatTime(t)}\` ${d.paused ? "⏸️" : "✅"} ${d.discordId ? `<@${d.discordId}>` : ""}`; }).join("\n").substring(0, 4000)).setTimestamp()] }); return; }
-    if (id === "logs_jobids") { await interaction.deferReply({ ephemeral: true }); const entries = Object.entries(userJobIds); if (!entries.length) { await interaction.editReply({ content: "Nenhum JobID." }); return; } await interaction.editReply({ content: "🎮 **JobIDs:**\n" + entries.map(([n, j]) => `• **${n}**: \`${j}\``).join("\n") }); return; }
-    if (id === "logs_blocked") { await interaction.deferReply({ ephemeral: true }); const now = Date.now(), active = Object.entries(blockedIPs).filter(([, u]) => now < u); if (!active.length) { await interaction.editReply({ content: "Nenhum IP bloqueado." }); return; } await interaction.editReply({ content: "🔒 **IPs:**\n" + active.map(([ip, u]) => `• \`${ip}\` — ${Math.ceil((u - now) / 1000)}s`).join("\n") }); return; }
-    if (id === "logs_pendentes") { await interaction.deferReply({ ephemeral: true }); const pendentes = await PendingPayment.find().sort({ createdAt: -1 }); if (!pendentes.length) { await interaction.editReply({ content: "✅ Nenhum pendente!" }); return; } const now = Date.now(); await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.warning).setTitle(`⏳ Pendentes (${pendentes.length})`).setDescription(pendentes.map(p => { const rem = PENDING_EXPIRY_MS - (now - new Date(p.createdAt).getTime()); return `• **${p.discordTag}** — ${p.label} R$${p.finalPrice || p.price} — ⏳ ${rem > 0 ? formatTimeShort(rem) : "expirando..."}`; }).join("\n")).setTimestamp()] }); return; }
-    if (id === "logs_confirmar_manual") { await interaction.showModal(new ModalBuilder().setCustomId("modal_pay_confirm").setTitle("Confirmar Pagamento").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("user_id").setLabel("ID Discord:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("horas").setLabel("Horas:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
-    if (id === "logs_cancelar_pedido") { await interaction.showModal(new ModalBuilder().setCustomId("modal_cancel_pedido").setTitle("Cancelar Pedido").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("user_id").setLabel("ID Discord:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("motivo").setLabel("Motivo:").setStyle(TextInputStyle.Short).setRequired(false)))); return; }
-    if (id === "logs_vendas") { await interaction.deferReply({ ephemeral: true }); const sales = await SaleHistory.find().sort({ confirmedAt: -1 }), totalR = sales.reduce((a, s) => a + (s.price || 0), 0), hoje = sales.filter(s => new Date(s.confirmedAt).toDateString() === new Date().toDateString()), hojeR = hoje.reduce((a, s) => a + (s.price || 0), 0); await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("💰 Vendas").addFields({ name: "📦 Total", value: `\`${sales.length}\``, inline: true },{ name: "💰 Receita", value: `\`R$${totalR}\``, inline: true },{ name: "📅 Hoje", value: `\`${hoje.length}\``, inline: true },{ name: "💵 Hoje R$", value: `\`R$${hojeR}\``, inline: true }).setTimestamp()] }); return; }
-    if (id === "logs_historico") { await interaction.deferReply({ ephemeral: true }); const sales = await SaleHistory.find().sort({ confirmedAt: -1 }).limit(20); if (!sales.length) { await interaction.editReply({ content: "Nenhuma venda." }); return; } await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("📜 Histórico").setDescription(sales.map(s => `• <@${s.discordId}> — **${s.label}** R$${s.price} — \`${s.keyName}\` — ${tsRelative(s.confirmedAt)}`).join("\n").substring(0, 4000)).setTimestamp()] }); return; }
-    if (id === "logs_coupon_create") { await interaction.showModal(new ModalBuilder().setCustomId("modal_coupon_create").setTitle("🎟️ Criar Cupom").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("code").setLabel("Código:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("discount").setLabel("Desconto:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("type").setLabel("Tipo (percent/fixed):").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("maxuses").setLabel("Máx usos:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
+    try {
+        if (interaction.isModalSubmit()) { 
+            await handleLogsModal(interaction).catch(err => {
+                console.error("[LOGS MODAL ERROR]:", err);
+                if (!interaction.replied && !interaction.deferred) {
+                    interaction.reply({ content: "❌ Erro ao processar modal.", flags: 64 }).catch(() => {});
+                }
+            });
+            return;
+        }
+        
+        if (!interaction.isButton()) return;
+        if (!interaction.customId.startsWith("logs_") && !interaction.customId.startsWith("pay_")) return;
+        
+        // Verifica permissão admin
+        if (!await isAdmin(interaction.member)) { 
+            await interaction.reply({ content: "❌ Sem permissão.", flags: 64 }).catch(() => {}); 
+            return; 
+        }
+        
+        const id = interaction.customId;
+        
+        // Handlers que precisam de deferReply IMEDIATO
+        if (id === "logs_online") { 
+            await interaction.deferReply().catch(() => {}); 
+            const sentMsg = await interaction.editReply({ embeds: [buildOnlineEmbed()] }).catch(() => {}); 
+            if (sentMsg) startOnlineInterval(interaction.channelId, sentMsg); 
+            return; 
+        }
+        
+        if (id === "logs_stoponline") { 
+            await interaction.deferReply({ flags: 64 }).catch(() => {}); 
+            stopOnlineInterval(interaction.channelId); 
+            await interaction.editReply({ content: "⏹️ Parado." }).catch(() => {}); 
+            return; 
+        }
+        
+        if (id === "logs_stats") { 
+            await interaction.deferReply({ flags: 64 }).catch(() => {}); 
+            const all = Object.values(keys).filter(k => !k.isAutoKey || k.remaining > 0), active = all.filter(k => !k.paused && (k.expiry === Infinity || k.expiry - Date.now() > 0)), paused = all.filter(k => k.paused), lt = all.filter(k => k.expiry === Infinity), online = Object.values(presence).filter(p => Date.now() - p.lastSeen < ONLINE_STALE_MS); 
+            const pendentes = await PendingPayment.countDocuments(); 
+            const totalVendas = await SaleHistory.aggregate([{ $group: { _id: null, total: { $sum: "$price" } } }]); 
+            await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("📊 Stats").setColor(COLORS.primary).addFields({ name: "🔑 Total", value: `\`${all.length}\``, inline: true },{ name: "✅ Ativas", value: `\`${active.length}\``, inline: true },{ name: "⏸️ Pausadas", value: `\`${paused.length}\``, inline: true },{ name: "♾️ Lifetime", value: `\`${lt.length}\``, inline: true },{ name: "🟢 Online", value: `\`${online.length}\``, inline: true },{ name: "⏳ Pendentes", value: `\`${pendentes}\``, inline: true },{ name: "💰 Receita", value: `\`R$${totalVendas[0]?.total || 0}\``, inline: true }).setTimestamp()] }).catch(() => {}); 
+            return; 
+        }
+        
+        if (id === "logs_listkeys") { 
+            await interaction.deferReply({ flags: 64 }).catch(() => {}); 
+            const ks = Object.keys(keys); 
+            if (!ks.length) { 
+                await interaction.editReply({ content: "Nenhuma key." }).catch(() => {}); 
+                return; 
+            } 
+            const now = Date.now(); 
+            await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("🔑 Keys").setColor(COLORS.primary).setDescription(ks.map(k => { const d = keys[k], t = d.paused ? d.remaining : (d.expiry === Infinity ? Infinity : d.expiry - now); return `• \`${k}\`: \`${formatTime(t)}\` ${d.paused ? "⏸️" : "✅"} ${d.discordId ? `<@${d.discordId}>` : ""}`; }).join("\n").substring(0, 4000)).setTimestamp()] }).catch(() => {}); 
+            return; 
+        }
+        
+        if (id === "logs_jobids") { 
+            await interaction.deferReply({ flags: 64 }).catch(() => {}); 
+            const entries = Object.entries(userJobIds); 
+            if (!entries.length) { 
+                await interaction.editReply({ content: "Nenhum JobID." }).catch(() => {}); 
+                return; 
+            } 
+            await interaction.editReply({ content: "🎮 **JobIDs:**\n" + entries.map(([n, j]) => `• **${n}**: \`${j}\``).join("\n") }).catch(() => {}); 
+            return; 
+        }
+        
+        if (id === "logs_blocked") { 
+            await interaction.deferReply({ flags: 64 }).catch(() => {}); 
+            const now = Date.now(), active = Object.entries(blockedIPs).filter(([, u]) => now < u); 
+            if (!active.length) { 
+                await interaction.editReply({ content: "Nenhum IP bloqueado." }).catch(() => {}); 
+                return; 
+            } 
+            await interaction.editReply({ content: "🔒 **IPs:**\n" + active.map(([ip, u]) => `• \`${ip}\` — ${Math.ceil((u - now) / 1000)}s`).join("\n") }).catch(() => {}); 
+            return; 
+        }
+        
+        if (id === "logs_pendentes") { 
+            await interaction.deferReply({ flags: 64 }).catch(() => {}); 
+            const pendentes = await PendingPayment.find().sort({ createdAt: -1 }); 
+            if (!pendentes.length) { 
+                await interaction.editReply({ content: "✅ Nenhum pendente!" }).catch(() => {}); 
+                return; 
+            } 
+            const now = Date.now(); 
+            await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.warning).setTitle(`⏳ Pendentes (${pendentes.length})`).setDescription(pendentes.map(p => { const rem = PENDING_EXPIRY_MS - (now - new Date(p.createdAt).getTime()); return `• **${p.discordTag}** — ${p.label} R$${p.finalPrice || p.price} — ⏳ ${rem > 0 ? formatTimeShort(rem) : "expirando..."}`; }).join("\n")).setTimestamp()] }).catch(() => {}); 
+            return; 
+        }
+        
+        // Modals não precisam de deferReply
+        if (id === "logs_confirmar_manual") { 
+            await interaction.showModal(new ModalBuilder().setCustomId("modal_pay_confirm").setTitle("Confirmar Pagamento").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("user_id").setLabel("ID Discord:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("horas").setLabel("Horas:").setStyle(TextInputStyle.Short).setRequired(true)))).catch(() => {}); 
+            return; 
+        }
+        
+        if (id === "logs_cancelar_pedido") { 
+            await interaction.showModal(new ModalBuilder().setCustomId("modal_cancel_pedido").setTitle("Cancelar Pedido").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("user_id").setLabel("ID Discord:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("motivo").setLabel("Motivo:").setStyle(TextInputStyle.Short).setRequired(false)))).catch(() => {}); 
+            return; 
+        }
+        
+        if (id === "logs_vendas") { 
+            await interaction.deferReply({ flags: 64 }).catch(() => {}); 
+            const sales = await SaleHistory.find().sort({ confirmedAt: -1 }), totalR = sales.reduce((a, s) => a + (s.price || 0), 0), hoje = sales.filter(s => new Date(s.confirmedAt).toDateString() === new Date().toDateString()), hojeR = hoje.reduce((a, s) => a + (s.price || 0), 0); 
+            await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("💰 Vendas").addFields({ name: "📦 Total", value: `\`${sales.length}\``, inline: true },{ name: "💰 Receita", value: `\`R$${totalR}\``, inline: true },{ name: "📅 Hoje", value: `\`${hoje.length}\``, inline: true },{ name: "💵 Hoje R$", value: `\`R$${hojeR}\``, inline: true }).setTimestamp()] }).catch(() => {}); 
+            return; 
+        }
+        
+        if (id === "logs_historico") { 
+            await interaction.deferReply({ flags: 64 }).catch(() => {}); 
+            const sales = await SaleHistory.find().sort({ confirmedAt: -1 }).limit(20); 
+            if (!sales.length) { 
+                await interaction.editReply({ content: "Nenhuma venda." }).catch(() => {}); 
+                return; 
+            } 
+            await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.success).setTitle("📜 Histórico").setDescription(sales.map(s => `• <@${s.discordId}> — **${s.label}** R$${s.price} — \`${s.keyName}\` — ${tsRelative(s.confirmedAt)}`).join("\n").substring(0, 4000)).setTimestamp()] }).catch(() => {}); 
+            return; 
+        }
+        
+        if (id === "logs_coupon_create") { 
+            await interaction.showModal(new ModalBuilder().setCustomId("modal_coupon_create").setTitle("🎟️ Criar Cupom").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("code").setLabel("Código:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("discount").setLabel("Desconto:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("type").setLabel("Tipo (percent/fixed):").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("maxuses").setLabel("Máx usos:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))).catch(() => {}); 
+            return; 
+        }
     if (id === "logs_coupon_list") { await interaction.deferReply({ ephemeral: true }); const coupons = await Coupon.find({ active: true }); if (!coupons.length) { await interaction.editReply({ content: "Nenhum cupom." }); return; } await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COLORS.gold).setTitle("🎟️ Cupons").setDescription(coupons.map(c => `• \`${c.code}\` — **${c.discount}${c.type === "percent" ? "%" : " R$"}** — ${c.usedCount}/${c.maxUses}`).join("\n")).setTimestamp()] }); return; }
     if (id === "logs_plan_edit") { await interaction.showModal(new ModalBuilder().setCustomId("modal_plan_edit").setTitle("📦 Editar Plano").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("value").setLabel("ID do plano:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("price").setLabel("Preço:").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("active").setLabel("Ativo? (sim/nao):").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("key_pass").setLabel("Senha:").setStyle(TextInputStyle.Short).setRequired(true)))); return; }
     
@@ -2399,10 +2507,22 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
     if (id.startsWith("pay_cancel_")) { await interaction.deferReply({ ephemeral: true }); const targetId = id.replace("pay_cancel_", ""); const pending = await PendingPayment.findOne({ discordId: targetId }); if (!pending) { await interaction.editReply({ content: "❌ Não encontrado." }); return; } await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `🗑️ Cancelado.` }); return; }
     const modalMap = { logs_create: buildModal_create, logs_lifetime: buildModal_lifetime, logs_revoke: buildModal_revoke, logs_pause: buildModal_pause, logs_reset: buildModal_reset, logs_addtime: buildModal_addtime, logs_setexpiry: buildModal_setexpiry, logs_transfer: buildModal_transfer, logs_sethwid: buildModal_sethwid, logs_lookup: buildModal_lookup, logs_unblock: buildModal_unblock, logs_cleanlogs: buildModal_cleanlogs };
     if (modalMap[id]) await interaction.showModal(modalMap[id]());
+    } catch (e) {
+        console.error("[LOGS INTERACTION ERROR]:", e);
+        try {
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({ content: "❌ Erro ao processar solicitação.", flags: 64 });
+            } else if (interaction.deferred) {
+                await interaction.editReply({ content: "❌ Erro ao processar solicitação." });
+            }
+        } catch (innerError) {
+            console.error("[LOGS INTERACTION ERROR RESPONSE FAILED]:", innerError.message);
+        }
+    }
 });
 
 async function handleLogsModal(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 }).catch(() => {});
     const id = interaction.customId;
     const getField = (name) => { try { return interaction.fields.getTextInputValue(name); } catch { return ""; } };
     const pass = getField("key_pass");
@@ -2675,7 +2795,7 @@ if (DISCORD_TOKEN_PAYMENT) clientPayment.login(DISCORD_TOKEN_PAYMENT);
 
 // ─── NOVA ROTA: OBTER PREÇO POR HORA (PÚBLICO) ───────────────────────────────
 // Variável global para o preço por hora (padrão R$2.00)
-let PRICE_PER_HOUR = 2.00;
+let PRICE_PER_HOUR = 7.50;
 
 app.get("/api/price", (req, res) => {
     res.json({ pricePerHour: PRICE_PER_HOUR });
@@ -2941,6 +3061,15 @@ app.post("/api/admin/deposits/reject", requireAdminAuth, async (req, res) => {
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
+});
+
+// Handlers globais para evitar crashes por erros não tratados
+process.on("unhandledRejection", (reason, promise) => {
+    console.error("[ERRO GLOBAL] Unhandled Rejection at:", promise, "reason:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+    console.error("[ERRO GLOBAL] Uncaught Exception thrown:", err);
 });
 
 // Socket.io para atualizações em tempo real

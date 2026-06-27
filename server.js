@@ -1274,7 +1274,7 @@ app.get("/api/online", async (req, res) => {
             }
             
             activeKeys.push({
-                keyPrefix: keyName.substring(0, 7) + "***",
+                keyPrefix: keyName.substring(0, 7) + "***", // Mascarado no site
                 discordUsername: username,
                 discordAvatar: avatar,
                 discordId: keyData.discordId,
@@ -2289,7 +2289,18 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
         
         if (id === "logs_stats") { 
             await interaction.deferReply({ flags: 64 }).catch(() => {}); 
-            const all = Object.values(keys).filter(k => !k.isAutoKey || k.remaining > 0), active = all.filter(k => !k.paused && (k.expiry === Infinity || k.expiry - Date.now() > 0)), paused = all.filter(k => k.paused), lt = all.filter(k => k.expiry === Infinity), online = Object.values(presence).filter(p => Date.now() - p.lastSeen < ONLINE_STALE_MS); 
+            const now = Date.now();
+            // Filtra auto-keys expiradas (expiry=0 e paused=true)
+            const all = Object.values(keys).filter(k => {
+                if (!k.isAutoKey) return true; // Sempre inclui keys normais
+                // Para auto-keys, verifica se tem tempo
+                if (k.paused) return k.remaining > 0;
+                return k.expiry === Infinity || k.expiry > now;
+            });
+            const active = all.filter(k => !k.paused && (k.expiry === Infinity || k.expiry > now));
+            const paused = all.filter(k => k.paused); 
+            const lt = all.filter(k => k.expiry === Infinity); 
+            const online = Object.values(presence).filter(p => now - p.lastSeen < ONLINE_STALE_MS); 
             const pendentes = await PendingPayment.countDocuments(); 
             const totalVendas = await SaleHistory.aggregate([{ $group: { _id: null, total: { $sum: "$price" } } }]); 
             await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("📊 Stats").setColor(COLORS.primary).addFields({ name: "🔑 Total", value: `\`${all.length}\``, inline: true },{ name: "✅ Ativas", value: `\`${active.length}\``, inline: true },{ name: "⏸️ Pausadas", value: `\`${paused.length}\``, inline: true },{ name: "♾️ Lifetime", value: `\`${lt.length}\``, inline: true },{ name: "🟢 Online", value: `\`${online.length}\``, inline: true },{ name: "⏳ Pendentes", value: `\`${pendentes}\``, inline: true },{ name: "💰 Receita", value: `\`R$${totalVendas[0]?.total || 0}\``, inline: true }).setTimestamp()] }).catch(() => {}); 
@@ -2298,13 +2309,35 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
         
         if (id === "logs_listkeys") { 
             await interaction.deferReply({ flags: 64 }).catch(() => {}); 
-            const ks = Object.keys(keys); 
-            if (!ks.length) { 
-                await interaction.editReply({ content: "Nenhuma key." }).catch(() => {}); 
+            // Filtra keys que não sejam auto-keys expiradas (expiry=0 e paused=true)
+            const validKeys = Object.entries(keys).filter(([, d]) => {
+                // Inclui se:
+                // - Não é auto-key OU
+                // - É auto-key mas tem tempo restante > 0
+                return !d.isAutoKey || (d.remaining > 0 || d.expiry > 0);
+            });
+            
+            if (!validKeys.length) { 
+                await interaction.editReply({ content: "Nenhuma key ativa." }).catch(() => {}); 
                 return; 
             } 
+            
             const now = Date.now(); 
-            await interaction.editReply({ embeds: [new EmbedBuilder().setTitle("🔑 Keys").setColor(COLORS.primary).setDescription(ks.map(k => { const d = keys[k], t = d.paused ? d.remaining : (d.expiry === Infinity ? Infinity : d.expiry - now); return `• \`${k}\`: \`${formatTime(t)}\` ${d.paused ? "⏸️" : "✅"} ${d.discordId ? `<@${d.discordId}>` : ""}`; }).join("\n").substring(0, 4000)).setTimestamp()] }).catch(() => {}); 
+            const keysList = validKeys.map(([k, d]) => { 
+                const t = d.paused ? d.remaining : (d.expiry === Infinity ? Infinity : d.expiry - now); 
+                const status = d.paused ? "⏸️" : (d.expiry === Infinity || t > 0 ? "✅" : "❌");
+                const userMention = d.discordId ? ` <@${d.discordId}>` : "";
+                return `• \`${k}\`: \`${formatTime(t)}\` ${status}${userMention}`; 
+            }).join("\n").substring(0, 4000);
+            
+            await interaction.editReply({ 
+                embeds: [new EmbedBuilder()
+                    .setTitle(`🔑 Keys (${validKeys.length})`)
+                    .setColor(COLORS.primary)
+                    .setDescription(keysList)
+                    .setTimestamp()
+                ] 
+            }).catch(() => {}); 
             return; 
         }
         

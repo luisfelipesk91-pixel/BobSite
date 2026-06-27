@@ -105,9 +105,9 @@ const clientPanel    = new Client({ intents: [GatewayIntentBits.Guilds, GatewayI
 const clientPayment  = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages], partials: [Partials.Channel, Partials.Message] });
 
 const DEFAULT_PLANS = [
-    { label: "1 Hora",   value: "1h",  price: 5,  hours: 1,  emoji: "🕐", active: true },
-    { label: "2 Horas",  value: "2h",  price: 10, hours: 2,  emoji: "⏱️", active: true },
-    { label: "4 Horas",  value: "4h",  price: 20, hours: 4,  emoji: "⚡", active: true },
+    { label: "1 Hora",   value: "1h",  price: 3,  hours: 1,  emoji: "🕐", active: true },
+    { label: "2 Horas",  value: "2h",  price: 6,  hours: 2,  emoji: "⏱️", active: true },
+    { label: "4 Horas",  value: "4h",  price: 12, hours: 4,  emoji: "⚡", active: true },
     { label: "8 Horas",  value: "8h",  price: 35, hours: 8,  emoji: "🔥", active: false },
     { label: "24 Horas", value: "24h", price: 80, hours: 24, emoji: "👑", active: false },
 ];
@@ -2310,27 +2310,13 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
         if (id === "logs_listkeys") { 
             await interaction.deferReply({ flags: 64 }).catch(() => {}); 
             
-            console.log("[DEBUG LISTKEYS] Total keys na memória:", Object.keys(keys).length);
-            console.log("[DEBUG LISTKEYS] Keys:", JSON.stringify(Object.entries(keys).map(([k, d]) => ({
-                key: k,
-                isAutoKey: d.isAutoKey,
-                paused: d.paused,
-                expiry: d.expiry,
-                remaining: d.remaining,
-                expiryDate: d.expiry === Infinity ? "Infinity" : new Date(d.expiry).toISOString()
-            })), null, 2));
-            
             // Filtra keys que não sejam auto-keys expiradas (expiry=0 e paused=true)
-            const validKeys = Object.entries(keys).filter(([k, d]) => {
+            const validKeys = Object.entries(keys).filter(([, d]) => {
                 // Inclui se:
                 // - Não é auto-key OU
                 // - É auto-key mas tem tempo restante > 0
-                const shouldInclude = !d.isAutoKey || (d.remaining > 0 || d.expiry > 0);
-                console.log(`[DEBUG] Key ${k}: isAutoKey=${d.isAutoKey}, remaining=${d.remaining}, expiry=${d.expiry}, include=${shouldInclude}`);
-                return shouldInclude;
+                return !d.isAutoKey || (d.remaining > 0 || d.expiry > 0);
             });
-            
-            console.log("[DEBUG LISTKEYS] Valid keys filtradas:", validKeys.length);
             
             if (!validKeys.length) { 
                 await interaction.editReply({ content: "❌ Nenhuma key ativa encontrada." }).catch(() => {}); 

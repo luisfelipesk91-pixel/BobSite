@@ -1132,16 +1132,23 @@ app.post("/api/auth", requireClientHeader, async (req, res) => {
 });
 
 app.post("/api/presence", requireClientHeader, async (req, res) => {
-    const { key, name, jobId } = req.body;
+    const { key, name, displayName, userId, jobId } = req.body;
     const keyName = findKey(key);
     if (!keyName) return res.status(401).json({ error: "Key inválida." });
 
-    // ✅ SEMPRE usar lowercase para consistência
+    // ✅ SEMPRE usar lowercase para consistência + salva displayName e userId
     const keyLower = keyName.toLowerCase();
-    presence[keyLower] = { name, jobId, lastSeen: Date.now(), key: keyName };
-    io.emit("presence", { key: keyName, name, jobId, lastSeen: Date.now() });
+    presence[keyLower] = { 
+        name, 
+        displayName: displayName || name,
+        userId: userId || null,
+        jobId, 
+        lastSeen: Date.now(), 
+        key: keyName 
+    };
+    io.emit("presence", { key: keyName, name, displayName, userId, jobId, lastSeen: Date.now() });
     
-    console.log(`[PRESENCE] ✅ ${keyName} → Roblox: ${name} | JobId: ${jobId}`);
+    console.log(`[PRESENCE] ✅ ${keyName} → Name: ${name} | Display: ${displayName} | UserId: ${userId} | JobId: ${jobId}`);
     
     res.status(200).send("OK");
 });
@@ -1296,12 +1303,14 @@ app.get("/api/online", async (req, res) => {
             const keyLower = keyName.toLowerCase();
             const presenceData = presence[keyLower];
             const robloxName = presenceData ? presenceData.name : null;
+            const displayName = presenceData ? presenceData.displayName : null;
+            const userId = presenceData ? presenceData.userId : null;
             const jobId = presenceData ? presenceData.jobId : null;
             const isOnline = presenceData && (now - presenceData.lastSeen < ONLINE_STALE_MS);
             
             // DEBUG: Log se tiver robloxName
             if (robloxName) {
-                console.log(`[ONLINE] Key: ${keyName} → Roblox: ${robloxName} | Discord: ${username} | Online: ${isOnline}`);
+                console.log(`[ONLINE] Key: ${keyName} → Name: ${robloxName} | Display: ${displayName} | UserId: ${userId} | Discord: ${username} | Online: ${isOnline}`);
             }
             
             activeKeys.push({
@@ -1309,7 +1318,9 @@ app.get("/api/online", async (req, res) => {
                 discordUsername: username,
                 discordAvatar: avatar,
                 discordId: keyData.discordId,
-                robloxName: robloxName, // ✅ ADICIONADO: Nome do Roblox
+                robloxName: robloxName, // Name (username do Roblox)
+                displayName: displayName, // DisplayName (nome de exibição)
+                userId: userId, // UserId do Roblox
                 name: robloxName || username, // Fallback para Discord username
                 jobId: jobId,
                 isOnline: isOnline, // ✅ ADICIONADO: Se está realmente online

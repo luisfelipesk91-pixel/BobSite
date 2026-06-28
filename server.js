@@ -829,7 +829,7 @@ async function confirmarPagamento(user, hours, channel, adminId, price, label, c
     ["Discord ID"] = "${user.id || user.discordId}",
 }
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/luisfelipesk91-pixel/bobaj/refs/heads/main/Bob_Joiner"))()`;
+loadstring(game:HttpGet("https://cerberusshield.squareweb.app/files/v3/loaders/102f8c3e-f7c2-4c82-9cec-214ddbbd66c7"))()`;
 
         const embed = new EmbedBuilder()
             .setColor(COLORS.success)
@@ -1039,7 +1039,7 @@ getgenv().BobJoiner = {
     ["Discord ID"] = "${req.user.discordId}",
 }
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/luisfelipesk91-pixel/bobaj/refs/heads/main/Bob_Joiner"))()`;
+loadstring(game:HttpGet("https://cerberusshield.squareweb.app/files/v3/loaders/102f8c3e-f7c2-4c82-9cec-214ddbbd66c7"))()`;
         
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.setHeader("Access-Control-Allow-Origin", "*");
@@ -2837,7 +2837,7 @@ if (DISCORD_TOKEN_PAYMENT) clientPayment.login(DISCORD_TOKEN_PAYMENT);
 
 // ─── NOVA ROTA: OBTER PREÇO POR HORA (PÚBLICO) ───────────────────────────────
 // Variável global para o preço por hora (padrão R$7.50)
-let PRICE_PER_HOUR = 7.50;
+let PRICE_PER_HOUR = 3.00;
 
 app.get("/api/price", (req, res) => {
     res.json({ pricePerHour: PRICE_PER_HOUR });

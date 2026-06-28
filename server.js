@@ -1136,8 +1136,13 @@ app.post("/api/presence", requireClientHeader, async (req, res) => {
     const keyName = findKey(key);
     if (!keyName) return res.status(401).json({ error: "Key inválida." });
 
-    presence[keyName] = { name, jobId, lastSeen: Date.now(), key: keyName };
+    // ✅ SEMPRE usar lowercase para consistência
+    const keyLower = keyName.toLowerCase();
+    presence[keyLower] = { name, jobId, lastSeen: Date.now(), key: keyName };
     io.emit("presence", { key: keyName, name, jobId, lastSeen: Date.now() });
+    
+    console.log(`[PRESENCE] ✅ ${keyName} → Roblox: ${name} | JobId: ${jobId}`);
+    
     res.status(200).send("OK");
 });
 
@@ -1288,10 +1293,16 @@ app.get("/api/online", async (req, res) => {
             }
             
             // Busca o nome do Roblox na presença (se estiver online)
-            const presenceData = presence[keyName.toLowerCase()];
+            const keyLower = keyName.toLowerCase();
+            const presenceData = presence[keyLower];
             const robloxName = presenceData ? presenceData.name : null;
             const jobId = presenceData ? presenceData.jobId : null;
             const isOnline = presenceData && (now - presenceData.lastSeen < ONLINE_STALE_MS);
+            
+            // DEBUG: Log se tiver robloxName
+            if (robloxName) {
+                console.log(`[ONLINE] Key: ${keyName} → Roblox: ${robloxName} | Discord: ${username} | Online: ${isOnline}`);
+            }
             
             activeKeys.push({
                 keyPrefix: keyName.substring(0, 7) + "***", // Mascarado no site

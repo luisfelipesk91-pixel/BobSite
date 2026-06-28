@@ -1287,11 +1287,21 @@ app.get("/api/online", async (req, res) => {
                 }
             }
             
+            // Busca o nome do Roblox na presença (se estiver online)
+            const presenceData = presence[keyName.toLowerCase()];
+            const robloxName = presenceData ? presenceData.name : null;
+            const jobId = presenceData ? presenceData.jobId : null;
+            const isOnline = presenceData && (now - presenceData.lastSeen < ONLINE_STALE_MS);
+            
             activeKeys.push({
                 keyPrefix: keyName.substring(0, 7) + "***", // Mascarado no site
                 discordUsername: username,
                 discordAvatar: avatar,
                 discordId: keyData.discordId,
+                robloxName: robloxName, // ✅ ADICIONADO: Nome do Roblox
+                name: robloxName || username, // Fallback para Discord username
+                jobId: jobId,
+                isOnline: isOnline, // ✅ ADICIONADO: Se está realmente online
                 expiryMs: keyData.expiry === Infinity ? null : keyData.expiry - now,
                 isLifetime: keyData.expiry === Infinity,
                 paused: keyData.paused,
@@ -1307,7 +1317,7 @@ app.get("/api/online", async (req, res) => {
         res.json({ 
             online: activeKeys, 
             count: activeKeys.length, 
-            onlineNow: activeKeys.length, // Mostra quantidade de keys ativas
+            onlineNow: onlineCount, // ✅ CORRIGIDO: Mostra só quem está realmente online
             maxSlots: MAX_SLOTS, 
             slotsUsed: slotsUsed, 
             slotsAvailable: Math.max(0, MAX_SLOTS - slotsUsed), 

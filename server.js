@@ -126,6 +126,10 @@ const KeySchema = new mongoose.Schema({
     discordId: { type: String, default: null },
     warnSent:  { type: Boolean, default: false },
     isAutoKey: { type: Boolean, default: false },
+    blacklisted: { type: Boolean, default: false },
+    blacklistReason: { type: String, default: null },
+    blacklistedAt: { type: Date, default: null },
+    hwidLocked: { type: Boolean, default: false },
 });
 const KeyModel = mongoose.model("Key", KeySchema);
 
@@ -1078,6 +1082,16 @@ app.post("/api/auth", requireClientHeader, async (req, res) => {
     const data = keys[keyName];
     const now = Date.now();
 
+    // 🚨 VERIFICAÇÃO DE BLACKLIST (PRIORIDADE MÁXIMA)
+    if (data.blacklisted) {
+        console.warn(`[AUTH] ⛔ Tentativa de login com key BANIDA: ${keyName}, Motivo: ${data.blacklistReason || "Não especificado"}`);
+        return res.status(403).json({ 
+            error: "Conta banida.", 
+            reason: data.blacklistReason || "Violação dos termos de uso.",
+            contact: "Entre em contato com o suporte para mais informações."
+        });
+    }
+
     if (data.paused) {
         console.warn(`[AUTH] Tentativa de login com key pausada: ${keyName}`);
         return res.status(401).json({ error: "Key pausada." });
@@ -1361,6 +1375,25 @@ app.post("/api/reset-hwid", requireAuth, async (req, res) => {
         }
         
         const keyName = keyEntry[0];
+        const keyData = keys[keyName];
+        
+        // 🚨 BLOQUEIO 1: Se a conta estiver blacklisted
+        if (keyData.blacklisted) {
+            console.warn(`[RESET HWID] ⛔ Tentativa de reset de HWID em conta BANIDA: ${keyName}`);
+            return res.status(403).json({ 
+                error: "Conta banida. HWID não pode ser resetado.",
+                reason: keyData.blacklistReason || "Violação dos termos de uso."
+            });
+        }
+        
+        // 🚨 BLOQUEIO 2: Se o HWID estiver travado por admin
+        if (keyData.hwidLocked) {
+            console.warn(`[RESET HWID] 🔒 Tentativa de reset de HWID TRAVADO: ${keyName}`);
+            return res.status(403).json({ 
+                error: "HWID travado pelo administrador.",
+                message: "Entre em contato com o suporte para destrancar."
+            });
+        }
         
         // Reseta o HWID
         keys[keyName].hwid = null;
@@ -2923,129 +2956,45 @@ app.get("/api/admin/deposits/pending", requireAdminAuth, async (req, res) => {
     }
 });
 
-// ─── NOVA ROTA: APROVAR DEPÓSITO E ADICIONAR SALDO (ADMIN) ───────────────────
-app.post("/api/admin/deposits/approve", requireAdminAuth, async (req, res) => {
+// ─── NOVA ROTA: BLACKLIST USER (ADMIN) ───────────────────────────────────────
+app.post("/api/admin/blacklist", requireAdminAuth, async (req, res) => {
     try {
-        const { code, adminId } = req.body;
+        const { key, reason } = req.body;
         
-        if (!code) {
-            return res.status(400).json({ error: "Código do depósito é obrigatório" });
+        if (!key) {
+            return res.status(400).json({ error: "Key é obrigatória" });
         }
         
-        // Busca o depósito pendente
-        const recharge = await Recharge.findOne({ code: code.toUpperCase(), status: "pending" });
-        
-        if (!recharge) {
-            return res.status(404).json({ error: "Depósito não encontrado ou já processado" });
+        if (!reason || reason.trim() === "") {
+            return res.status(400).json({ error: "Motivo do banimento é obrigatório" });
         }
         
-        const { discordId, discordTag, amount } = recharge;
+        // Busca a key
+        const keyName = findKey(key);
         
-        // Atualiza o status do depósito para confirmado
-        recharge.status = "confirmed";
-        recharge.confirmedBy = adminId || "admin";
-        await recharge.save();
-        
-        // Adiciona saldo ao usuário
-        const user = await User.findOne({ discordId });
-        if (!user) {
-            return res.status(404).json({ error: "Usuário não encontrado" });
+        if (!keyName) {
+            return res.status(404).json({ error: "Key não encontrada" });
         }
         
-        user.balance += amount;
-        await user.save();
+        const keyData = keys[keyName];
         
-        // Registra transação
-        await new Transaction({
-            discordId,
-            type: "deposit",
-            amount,
-            description: `Depósito PIX aprovado (${code})`
-        }).save();
-        
-        console.log(`[ADMIN] Depósito aprovado: ${code} | R$${amount} → ${discordTag}`);
-        
-        // Envia notificação no canal de logs
-        if (LOGS_CHANNEL_ID && clientLogs.isReady()) {
-            try {
-                const channel = await clientLogs.channels.fetch(LOGS_CHANNEL_ID);
-                if (channel) {
-                    const embed = new EmbedBuilder()
-                        .setColor(COLORS.success)
-                        .setTitle("✅ Depósito Aprovado")
-                        .addFields(
-                            { name: "Usuário", value: `<@${discordId}> (${discordTag})`, inline: true },
-                            { name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },
-                            { name: "Código", value: `\`${code}\``, inline: true },
-                            { name: "Aprovado por", value: adminId ? `<@${adminId}>` : "Admin", inline: true },
-                            { name: "Novo Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }
-                        )
-                        .setTimestamp();
-                    await channel.send({ embeds: [embed] });
-                }
-            } catch (e) {
-                console.error("[ADMIN] Erro ao enviar notificação:", e.message);
-            }
+        // Verifica se já está blacklisted
+        if (keyData.blacklisted) {
+            return res.status(400).json({ 
+                error: "Key já está banida",
+                reason: keyData.blacklistReason,
+                bannedAt: keyData.blacklistedAt
+            });
         }
         
-        // Tenta enviar DM ao usuário
-        try {
-            const userObj = await fetchUserFromAnyClient(discordId);
-            if (userObj) {
-                const embed = new EmbedBuilder()
-                    .setColor(COLORS.success)
-                    .setTitle("✅ Depósito Confirmado!")
-                    .setDescription(`Seu depósito de **R$${amount.toFixed(2)}** foi aprovado e adicionado ao seu saldo!`)
-                    .addFields(
-                        { name: "Código", value: `\`${code}\``, inline: true },
-                        { name: "Novo Saldo", value: `R$${user.balance.toFixed(2)}`, inline: true }
-                    )
-                    .setFooter({ text: "Bob Notifier" })
-                    .setTimestamp();
-                await userObj.send({ embeds: [embed] });
-            }
-        } catch (e) {
-            console.error("[ADMIN] Erro ao enviar DM:", e.message);
-        }
+        // Aplica blacklist
+        keys[keyName].blacklisted = true;
+        keys[keyName].blacklistReason = reason.trim();
+        keys[keyName].blacklistedAt = new Date();
+        keys[keyName].hwidLocked = true; // Trava o HWID também
+        await saveKey(keyName);
         
-        res.json({ 
-            ok: true, 
-            amount,
-            discordTag,
-            discordId,
-            newBalance: user.balance,
-            message: `Depósito aprovado: R$${amount.toFixed(2)} adicionado ao saldo de ${discordTag}`
-        });
-        
-    } catch (e) {
-        console.error("[ADMIN] Erro ao aprovar depósito:", e.message);
-        res.status(500).json({ error: "Erro ao aprovar depósito" });
-    }
-});
-
-// ─── NOVA ROTA: REJEITAR/CANCELAR DEPÓSITO (ADMIN) ───────────────────────────
-app.post("/api/admin/deposits/reject", requireAdminAuth, async (req, res) => {
-    try {
-        const { code, reason } = req.body;
-        
-        if (!code) {
-            return res.status(400).json({ error: "Código do depósito é obrigatório" });
-        }
-        
-        // Busca o depósito pendente
-        const recharge = await Recharge.findOne({ code: code.toUpperCase(), status: "pending" });
-        
-        if (!recharge) {
-            return res.status(404).json({ error: "Depósito não encontrado ou já processado" });
-        }
-        
-        const { discordId, discordTag, amount } = recharge;
-        
-        // Atualiza o status do depósito para cancelado
-        recharge.status = "cancelled";
-        await recharge.save();
-        
-        console.log(`[ADMIN] Depósito rejeitado: ${code} | R$${amount} → ${discordTag}`);
+        console.log(`[ADMIN] ⛔ Key BANIDA: ${keyName} | Motivo: ${reason}`);
         
         // Envia notificação no canal de logs
         if (LOGS_CHANNEL_ID && clientLogs.isReady()) {
@@ -3054,13 +3003,13 @@ app.post("/api/admin/deposits/reject", requireAdminAuth, async (req, res) => {
                 if (channel) {
                     const embed = new EmbedBuilder()
                         .setColor(COLORS.danger)
-                        .setTitle("❌ Depósito Rejeitado")
+                        .setTitle("⛔ Usuário Banido")
                         .addFields(
-                            { name: "Usuário", value: `<@${discordId}> (${discordTag})`, inline: true },
-                            { name: "Valor", value: `R$${amount.toFixed(2)}`, inline: true },
-                            { name: "Código", value: `\`${code}\``, inline: true }
+                            { name: "Key", value: `\`${keyName}\``, inline: true },
+                            { name: "Discord", value: keyData.discordId ? `<@${keyData.discordId}>` : "N/A", inline: true },
+                            { name: "HWID", value: keyData.hwid ? `\`${keyData.hwid.substring(0, 16)}...\`` : "N/A", inline: false },
+                            { name: "Motivo", value: reason, inline: false }
                         )
-                        .setDescription(reason ? `**Motivo:** ${reason}` : null)
                         .setTimestamp();
                     await channel.send({ embeds: [embed] });
                 }
@@ -3070,33 +3019,103 @@ app.post("/api/admin/deposits/reject", requireAdminAuth, async (req, res) => {
         }
         
         // Tenta enviar DM ao usuário
-        try {
-            const userObj = await fetchUserFromAnyClient(discordId);
-            if (userObj) {
-                const embed = new EmbedBuilder()
-                    .setColor(COLORS.danger)
-                    .setTitle("❌ Depósito Rejeitado")
-                    .setDescription(`Seu depósito de **R$${amount.toFixed(2)}** foi rejeitado.`)
-                    .addFields(
-                        { name: "Código", value: `\`${code}\``, inline: true }
-                    )
-                    .setDescription(reason ? `**Motivo:** ${reason}` : "Entre em contato com o suporte para mais informações.")
-                    .setFooter({ text: "Bob Notifier" })
-                    .setTimestamp();
-                await userObj.send({ embeds: [embed] });
+        if (keyData.discordId) {
+            try {
+                const userObj = await fetchUserFromAnyClient(keyData.discordId);
+                if (userObj) {
+                    const embed = new EmbedBuilder()
+                        .setColor(COLORS.danger)
+                        .setTitle("⛔ Conta Banida")
+                        .setDescription("Sua conta foi banida do Bob Joiner.")
+                        .addFields(
+                            { name: "Motivo", value: reason, inline: false },
+                            { name: "Suporte", value: "Entre em contato com o administrador para mais informações.", inline: false }
+                        )
+                        .setFooter({ text: "Bob Notifier" })
+                        .setTimestamp();
+                    await userObj.send({ embeds: [embed] });
+                }
+            } catch (e) {
+                console.error("[ADMIN] Erro ao enviar DM:", e.message);
             }
-        } catch (e) {
-            console.error("[ADMIN] Erro ao enviar DM:", e.message);
         }
         
         res.json({ 
-            ok: true,
-            message: `Depósito rejeitado: ${code}`
+            ok: true, 
+            keyName,
+            reason,
+            message: `Key ${keyName} foi banida com sucesso`,
+            discordId: keyData.discordId
         });
         
     } catch (e) {
-        console.error("[ADMIN] Erro ao rejeitar depósito:", e.message);
-        res.status(500).json({ error: "Erro ao rejeitar depósito" });
+        console.error("[ADMIN] Erro ao banir usuário:", e.message);
+        res.status(500).json({ error: "Erro ao banir usuário" });
+    }
+});
+
+// ─── NOVA ROTA: REMOVER BLACKLIST (ADMIN) ────────────────────────────────────
+app.post("/api/admin/unblacklist", requireAdminAuth, async (req, res) => {
+    try {
+        const { key } = req.body;
+        
+        if (!key) {
+            return res.status(400).json({ error: "Key é obrigatória" });
+        }
+        
+        // Busca a key
+        const keyName = findKey(key);
+        
+        if (!keyName) {
+            return res.status(404).json({ error: "Key não encontrada" });
+        }
+        
+        const keyData = keys[keyName];
+        
+        // Verifica se está blacklisted
+        if (!keyData.blacklisted) {
+            return res.status(400).json({ error: "Key não está banida" });
+        }
+        
+        // Remove blacklist
+        keys[keyName].blacklisted = false;
+        keys[keyName].blacklistReason = null;
+        keys[keyName].blacklistedAt = null;
+        keys[keyName].hwidLocked = false; // Destrava o HWID
+        keys[keyName].hwid = null; // Reseta o HWID
+        await saveKey(keyName);
+        
+        console.log(`[ADMIN] ✅ Key DESBANIDA: ${keyName}`);
+        
+        // Envia notificação no canal de logs
+        if (LOGS_CHANNEL_ID && clientLogs.isReady()) {
+            try {
+                const channel = await clientLogs.channels.fetch(LOGS_CHANNEL_ID);
+                if (channel) {
+                    const embed = new EmbedBuilder()
+                        .setColor(COLORS.success)
+                        .setTitle("✅ Usuário Desbanido")
+                        .addFields(
+                            { name: "Key", value: `\`${keyName}\``, inline: true },
+                            { name: "Discord", value: keyData.discordId ? `<@${keyData.discordId}>` : "N/A", inline: true }
+                        )
+                        .setTimestamp();
+                    await channel.send({ embeds: [embed] });
+                }
+            } catch (e) {
+                console.error("[ADMIN] Erro ao enviar notificação:", e.message);
+            }
+        }
+        
+        res.json({ 
+            ok: true, 
+            keyName,
+            message: `Key ${keyName} foi desbanida com sucesso`
+        });
+        
+    } catch (e) {
+        console.error("[ADMIN] Erro ao desbanir usuário:", e.message);
+        res.status(500).json({ error: "Erro ao desbanir usuário" });
     }
 });
 

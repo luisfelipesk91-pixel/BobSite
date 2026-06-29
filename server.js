@@ -1201,7 +1201,7 @@ app.post("/api/brainrot", requireClientHeader, requireValidKey, async (req, res)
     // ✅ Valida que a requisição vem de uma key ativa
     // (req.validKey foi definido pelo middleware requireValidKey)
     
-    pushBrainrot({ 
+    const logData = { 
         id: Date.now().toString(), 
         brainrot, 
         name, 
@@ -1213,7 +1213,11 @@ app.post("/api/brainrot", requireClientHeader, requireValidKey, async (req, res)
         placeId: placeId || "109983668079237",
         inDuel: inDuel || false,
         reportedBy: req.validKey  // ✅ Rastreabilidade
-    });
+    };
+    
+    console.log("[BRAINROT RECEBIDO]", logData.id, "-", logData.name || logData.brainrot, "-", logData.value);
+    
+    pushBrainrot(logData);
     res.status(200).send("OK");
 });
 

@@ -929,54 +929,9 @@ function requireClientHeader(req, res, next) {
         // Requisição do Hopper
         next();
     } else {
-        console.warn(`[AUTH] Acesso negado: Client-Header '${clientHeader}' ou Secret '${secret}' inválido.`);
+        console.warn(`[AUTH] Acesso negado: Client-Header \'${clientHeader}\' ou Secret \'${secret}\' inválido.`);
         res.status(403).send("Forbidden");
     }
-}
-
-// 🛡️ NOVO: Middleware para validar key ativa (proteção contra source vazada)
-function requireValidKey(req, res, next) {
-    const { key } = req.query || req.body;
-    
-    if (!key) {
-        console.warn(`[SECURITY] Tentativa de acesso sem key - IP: ${req.ip}`);
-        return res.status(401).json({ error: "Key não fornecida" });
-    }
-    
-    const keyName = findKey(key);
-    if (!keyName) {
-        console.warn(`[SECURITY] Tentativa de acesso com key inválida: ${key} - IP: ${req.ip}`);
-        return res.status(401).json({ error: "Key inválida" });
-    }
-    
-    const keyData = keys[keyName];
-    const now = Date.now();
-    
-    // Verifica blacklist (prioridade máxima)
-    if (keyData.blacklisted) {
-        console.warn(`[SECURITY] ⛔ Tentativa de acesso com key BANIDA: ${keyName} - IP: ${req.ip}`);
-        return res.status(403).json({ 
-            error: "Conta banida.",
-            reason: keyData.blacklistReason || "Violação dos termos de uso."
-        });
-    }
-    
-    // Verifica se expirou
-    if (keyData.expiry !== Infinity && keyData.expiry - now <= 0) {
-        console.warn(`[SECURITY] Tentativa de acesso com key EXPIRADA: ${keyName} - IP: ${req.ip}`);
-        return res.status(401).json({ error: "Key expirada" });
-    }
-    
-    // Verifica se pausada
-    if (keyData.paused) {
-        console.warn(`[SECURITY] Tentativa de acesso com key PAUSADA: ${keyName} - IP: ${req.ip}`);
-        return res.status(401).json({ error: "Key pausada" });
-    }
-    
-    // ✅ Key válida e ativa
-    req.validKey = keyName;
-    req.keyData = keyData;
-    next();
 }
 
 // Middleware para autenticação JWT (para o frontend)
@@ -1176,10 +1131,12 @@ app.post("/api/auth", requireClientHeader, async (req, res) => {
     res.json({ ok: true, timeLeft, isLifetime: data.expiry === Infinity });
 });
 
-app.post("/api/presence", requireClientHeader, requireValidKey, async (req, res) => {
-    const { name, displayName, userId, jobId } = req.body;
-    const keyName = req.validKey;  // ✅ Já validado pelo middleware
-    
+app.post("/api/presence", requireClientHeader, async (req, res) => {
+    console.log("[PRESENCE DEBUG] Requisição recebida:", JSON.stringify(req.body));
+    const { key, name, displayName, userId, jobId } = req.body;
+    const keyName = findKey(key);
+    if (!keyName) return res.status(401).json({ error: "Key inválida." });
+
     // ✅ SEMPRE usar lowercase para consistência + salva displayName e userId
     const keyLower = keyName.toLowerCase();
     presence[keyLower] = { 
@@ -1195,12 +1152,9 @@ app.post("/api/presence", requireClientHeader, requireValidKey, async (req, res)
     res.status(200).send("OK");
 });
 
-app.post("/api/brainrot", requireClientHeader, requireValidKey, async (req, res) => {
+app.post("/api/brainrot", requireClientHeader, async (req, res) => {
+    console.log("[BRAINROT DEBUG] Requisição recebida:", JSON.stringify(req.body));
     const { brainrot, name, jobId, value, owner, players, maxPlayers, placeId, inDuel } = req.body;
-    
-    // ✅ Valida que a requisição vem de uma key ativa
-    // (req.validKey foi definido pelo middleware requireValidKey)
-    
     pushBrainrot({ 
         id: Date.now().toString(), 
         brainrot, 
@@ -1211,13 +1165,13 @@ app.post("/api/brainrot", requireClientHeader, requireValidKey, async (req, res)
         players: players || "?",
         maxPlayers: maxPlayers || "?",
         placeId: placeId || "109983668079237",
-        inDuel: inDuel || false,
-        reportedBy: req.validKey  // ✅ Rastreabilidade
+        inDuel: inDuel || false
     });
     res.status(200).send("OK");
 });
 
-app.get("/api/latest", requireClientHeader, requireValidKey, (req, res) => {
+app.get("/api/latest", requireClientHeader, (req, res) => {
+    console.log("[LATEST DEBUG] Requisição de:", req.query.key);
     const latest = brainrots.length > 0 ? brainrots[brainrots.length - 1] : null;
     if (latest) {
         res.json(latest);
@@ -1231,9 +1185,9 @@ app.post("/api/clear", requireAdminAuth, async (req, res) => {
     res.status(200).send("OK");
 });
 
-app.post("/api/log", requireClientHeader, requireValidKey, async (req, res) => {
+app.post("/api/log", requireClientHeader, async (req, res) => {
     const { message } = req.body;
-    console.log(`[CLIENT LOG] ${req.validKey}: ${message}`);
+    console.log(`[CLIENT LOG] ${message}`);
     res.status(200).send("OK");
 });
 

@@ -52,9 +52,9 @@ const JWT_SECRET    = process.env.JWT_SECRET || "bobjoiner_jwt_secret_2026";
 const BOBLOGS_ENABLED = process.env.BOBLOGS_ENABLED === "true";
 
 if (BOBLOGS_ENABLED) {
-    console.log("[BOBLOGS] Integração com bot Discord habilitada");
+    // console.log("[BOBLOGS] Integração com bot Discord habilitada");
 } else {
-    console.log("[BOBLOGS] Modo local (sem integração com bot)");
+    // console.log("[BOBLOGS] Modo local (sem integração com bot)");
 }
 
 const CLIENT_HEADER          = process.env.CLIENT_HEADER           || "BobJoiner-v2";
@@ -82,10 +82,10 @@ if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET) {
     console.error("[FATAL] DISCORD_CLIENT_ID ou DISCORD_CLIENT_SECRET não configurado!");
     console.error("[FATAL] Configure as variáveis de ambiente no Railway");
 }
-console.log("[CONFIG] BACKEND_URL:", BACKEND_URL);
-console.log("[CONFIG] FRONTEND_URL:", FRONTEND_URL);
-console.log("[CONFIG] REDIRECT_URI:", REDIRECT_URI);
-console.log("[CONFIG] DISCORD_CLIENT_ID:", DISCORD_CLIENT_ID ? "✓ Configurado" : "✗ FALTANDO");
+// console.log("[CONFIG] BACKEND_URL:", BACKEND_URL);
+// console.log("[CONFIG] FRONTEND_URL:", FRONTEND_URL);
+// console.log("[CONFIG] REDIRECT_URI:", REDIRECT_URI);
+// console.log("[CONFIG] DISCORD_CLIENT_ID:", DISCORD_CLIENT_ID ? "✓ Configurado" : "✗ FALTANDO");
 
 const ADMIN_ROLE_IDS = process.env.ADMIN_ROLE_IDS ? process.env.ADMIN_ROLE_IDS.split(",") : ["1477885793144930496","1501356382677373101","1477885797553148066"];
 const RECHARGE_CHANNEL = process.env.RECHARGE_CHANNEL || "1511517095412895905";
@@ -95,8 +95,8 @@ const MIN_RECHARGE = parseInt(process.env.MIN_RECHARGE || "5");
 const BUYER_ROLE_ID = process.env.BUYER_ROLE_ID || "1502103327595434115";
 const GUILD_ID = process.env.GUILD_ID || "1477872742933069846"; // ID do servidor Discord (correto)
 
-console.log("[CONFIG] BUYER_ROLE_ID:", BUYER_ROLE_ID);
-console.log("[CONFIG] GUILD_ID:", GUILD_ID);
+// console.log("[CONFIG] BUYER_ROLE_ID:", BUYER_ROLE_ID);
+// console.log("[CONFIG] GUILD_ID:", GUILD_ID);
 
 // --- INITIALIZE DISCORD CLIENTS FIRST ---
 const clientNotifier = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildWebhooks] });
@@ -114,7 +114,7 @@ const DEFAULT_PLANS = [
 let PLANS = [...DEFAULT_PLANS];
 
 mongoose.connect(MONGODB_URI)
-    .then(() => { console.log("[DB] MongoDB conectado!"); loadPlansFromDB(); })
+    .then(() => { /* console.log("[DB] MongoDB conectado!"); */ loadPlansFromDB(); })
     .catch(e => { console.error("[DB] Erro ao conectar ao MongoDB:", e.message); });
 
 const KeySchema = new mongoose.Schema({
@@ -271,7 +271,7 @@ async function bobLogsCreateKey(discordId, discordTag, hours) {
         // Comando para criar key no BobLogs (ajuste conforme os comandos do seu bot)
         await channel.send(`!createkey ${keyName} ${hours}h ${discordId}`);
         
-        console.log(`[BOBLOGS] ✅ Comando enviado para criar key: ${keyName} (${hours}h) para ${discordTag}`);
+        // console.log(`[BOBLOGS] ✅ Comando enviado para criar key: ${keyName} (${hours}h) para ${discordTag}`);
         
         // Salva localmente também para referência rápida
         keys[keyName] = {
@@ -303,7 +303,7 @@ async function bobLogsExtendKey(keyName, hours) {
         // Comando para estender key no BobLogs (ajuste conforme os comandos do seu bot)
         await channel.send(`!addtime ${keyName} ${hours}h`);
         
-        console.log(`[BOBLOGS] ✅ Comando enviado para estender key: ${keyName} +${hours}h`);
+        // console.log(`[BOBLOGS] ✅ Comando enviado para estender key: ${keyName} +${hours}h`);
         
         // Atualiza localmente também
         if (keys[keyName]) {
@@ -398,7 +398,7 @@ async function loadKeys() {
                 isAutoKey: d.isAutoKey || false,
             };
         }
-        console.log(`[DB] ${Object.keys(keys).length} keys carregadas. ${expired} expiradas removidas.`);
+        // console.log(`[DB] ${Object.keys(keys).length} keys carregadas. ${expired} expiradas removidas.`);
     } catch (e) { console.error("[DB] Erro ao carregar keys:", e.message); }
 }
 
@@ -419,12 +419,12 @@ async function createAutoKeyForUser(discordId, discordTag) {
     const discordIdStr = String(discordId);
     const existing = Object.entries(keys).find(([, d]) => d.discordId === discordIdStr);
     if (existing) {
-        console.log(`[AUTH] Usuário ${discordTag} já tem key em memória: ${existing[0]}`);
+        // console.log(`[AUTH] Usuário ${discordTag} já tem key em memória: ${existing[0]}`);
         return existing[0];
     }
     const existingInDB = await KeyModel.findOne({ discordId: discordIdStr });
     if (existingInDB) {
-        console.log(`[AUTH] Usuário ${discordTag} já tem key no banco: ${existingInDB.name}`);
+        // console.log(`[AUTH] Usuário ${discordTag} já tem key no banco: ${existingInDB.name}`);
         if (!keys[existingInDB.name]) {
             const expiry = existingInDB.expiry >= LIFETIME_VALUE ? Infinity : existingInDB.expiry;
             const remaining = existingInDB.remaining >= LIFETIME_VALUE ? Infinity : existingInDB.remaining;
@@ -439,7 +439,7 @@ async function createAutoKeyForUser(discordId, discordTag) {
     const keyName = generateBobKey();
     keys[keyName] = { expiry: 0, paused: true, remaining: 0, hwid: null, discordId: discordIdStr, warnSent: false, isAutoKey: true };
     await saveKey(keyName);
-    console.log(`[AUTH] ✅ Key auto-gerada no login: ${keyName} → ${discordTag}`);
+    // console.log(`[AUTH] ✅ Key auto-gerada no login: ${keyName} → ${discordTag}`);
     return keyName;
 }
 
@@ -617,9 +617,9 @@ async function addBuyerRole(discordId) {
     }
     
     try {
-        console.log(`[BUYER ROLE] Tentando adicionar cargo para: ${discordId}`);
-        console.log(`[BUYER ROLE] GUILD_ID configurado: ${GUILD_ID}`);
-        console.log(`[BUYER ROLE] Servidores disponíveis:`, clientLogs.guilds.cache.map(g => `${g.name} (${g.id})`).join(", "));
+        // console.log(`[BUYER ROLE] Tentando adicionar cargo para: ${discordId}`);
+        // console.log(`[BUYER ROLE] GUILD_ID configurado: ${GUILD_ID}`);
+        // console.log(`[BUYER ROLE] Servidores disponíveis:`, clientLogs.guilds.cache.map(g => `${g.name} (${g.id})`).join(", "));
         
         // Tenta buscar o servidor usando clientLogs (tem GuildMembers intent)
         const guild = await clientLogs.guilds.fetch(GUILD_ID).catch(e => {
@@ -929,9 +929,54 @@ function requireClientHeader(req, res, next) {
         // Requisição do Hopper
         next();
     } else {
-        console.warn(`[AUTH] Acesso negado: Client-Header \'${clientHeader}\' ou Secret \'${secret}\' inválido.`);
+        console.warn(`[AUTH] Acesso negado: Client-Header '${clientHeader}' ou Secret '${secret}' inválido.`);
         res.status(403).send("Forbidden");
     }
+}
+
+// 🛡️ NOVO: Middleware para validar key ativa (proteção contra source vazada)
+function requireValidKey(req, res, next) {
+    const { key } = req.query || req.body;
+    
+    if (!key) {
+        console.warn(`[SECURITY] Tentativa de acesso sem key - IP: ${req.ip}`);
+        return res.status(401).json({ error: "Key não fornecida" });
+    }
+    
+    const keyName = findKey(key);
+    if (!keyName) {
+        console.warn(`[SECURITY] Tentativa de acesso com key inválida: ${key} - IP: ${req.ip}`);
+        return res.status(401).json({ error: "Key inválida" });
+    }
+    
+    const keyData = keys[keyName];
+    const now = Date.now();
+    
+    // Verifica blacklist (prioridade máxima)
+    if (keyData.blacklisted) {
+        console.warn(`[SECURITY] ⛔ Tentativa de acesso com key BANIDA: ${keyName} - IP: ${req.ip}`);
+        return res.status(403).json({ 
+            error: "Conta banida.",
+            reason: keyData.blacklistReason || "Violação dos termos de uso."
+        });
+    }
+    
+    // Verifica se expirou
+    if (keyData.expiry !== Infinity && keyData.expiry - now <= 0) {
+        console.warn(`[SECURITY] Tentativa de acesso com key EXPIRADA: ${keyName} - IP: ${req.ip}`);
+        return res.status(401).json({ error: "Key expirada" });
+    }
+    
+    // Verifica se pausada
+    if (keyData.paused) {
+        console.warn(`[SECURITY] Tentativa de acesso com key PAUSADA: ${keyName} - IP: ${req.ip}`);
+        return res.status(401).json({ error: "Key pausada" });
+    }
+    
+    // ✅ Key válida e ativa
+    req.validKey = keyName;
+    req.keyData = keyData;
+    next();
 }
 
 // Middleware para autenticação JWT (para o frontend)
@@ -1131,11 +1176,10 @@ app.post("/api/auth", requireClientHeader, async (req, res) => {
     res.json({ ok: true, timeLeft, isLifetime: data.expiry === Infinity });
 });
 
-app.post("/api/presence", requireClientHeader, async (req, res) => {
-    const { key, name, displayName, userId, jobId } = req.body;
-    const keyName = findKey(key);
-    if (!keyName) return res.status(401).json({ error: "Key inválida." });
-
+app.post("/api/presence", requireClientHeader, requireValidKey, async (req, res) => {
+    const { name, displayName, userId, jobId } = req.body;
+    const keyName = req.validKey;  // ✅ Já validado pelo middleware
+    
     // ✅ SEMPRE usar lowercase para consistência + salva displayName e userId
     const keyLower = keyName.toLowerCase();
     presence[keyLower] = { 
@@ -1148,13 +1192,15 @@ app.post("/api/presence", requireClientHeader, async (req, res) => {
     };
     io.emit("presence", { key: keyName, name, displayName, userId, jobId, lastSeen: Date.now() });
     
-    console.log(`[PRESENCE] ✅ ${keyName} → Name: ${name} | Display: ${displayName} | UserId: ${userId} | JobId: ${jobId}`);
-    
     res.status(200).send("OK");
 });
 
-app.post("/api/brainrot", requireClientHeader, async (req, res) => {
+app.post("/api/brainrot", requireClientHeader, requireValidKey, async (req, res) => {
     const { brainrot, name, jobId, value, owner, players, maxPlayers, placeId, inDuel } = req.body;
+    
+    // ✅ Valida que a requisição vem de uma key ativa
+    // (req.validKey foi definido pelo middleware requireValidKey)
+    
     pushBrainrot({ 
         id: Date.now().toString(), 
         brainrot, 
@@ -1165,12 +1211,13 @@ app.post("/api/brainrot", requireClientHeader, async (req, res) => {
         players: players || "?",
         maxPlayers: maxPlayers || "?",
         placeId: placeId || "109983668079237",
-        inDuel: inDuel || false
+        inDuel: inDuel || false,
+        reportedBy: req.validKey  // ✅ Rastreabilidade
     });
     res.status(200).send("OK");
 });
 
-app.get("/api/latest", requireClientHeader, (req, res) => {
+app.get("/api/latest", requireClientHeader, requireValidKey, (req, res) => {
     const latest = brainrots.length > 0 ? brainrots[brainrots.length - 1] : null;
     if (latest) {
         res.json(latest);
@@ -1184,9 +1231,9 @@ app.post("/api/clear", requireAdminAuth, async (req, res) => {
     res.status(200).send("OK");
 });
 
-app.post("/api/log", requireClientHeader, async (req, res) => {
+app.post("/api/log", requireClientHeader, requireValidKey, async (req, res) => {
     const { message } = req.body;
-    console.log(`[CLIENT LOG] ${message}`);
+    console.log(`[CLIENT LOG] ${req.validKey}: ${message}`);
     res.status(200).send("OK");
 });
 
@@ -1307,11 +1354,6 @@ app.get("/api/online", async (req, res) => {
             const userId = presenceData ? presenceData.userId : null;
             const jobId = presenceData ? presenceData.jobId : null;
             const isOnline = presenceData && (now - presenceData.lastSeen < ONLINE_STALE_MS);
-            
-            // DEBUG: Log se tiver robloxName
-            if (robloxName) {
-                console.log(`[ONLINE] Key: ${keyName} → Name: ${robloxName} | Display: ${displayName} | UserId: ${userId} | Discord: ${username} | Online: ${isOnline}`);
-            }
             
             activeKeys.push({
                 keyPrefix: keyName.substring(0, 7) + "***", // Mascarado no site

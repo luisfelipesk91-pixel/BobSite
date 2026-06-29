@@ -1393,6 +1393,68 @@ app.get("/api/online", async (req, res) => {
     }
 });
 
+// ── ENDPOINT: TOP DEPOSITS (RANKING) ────────────────────────────
+app.get("/api/top-deposits", async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 10;
+        
+        // Busca histórico de vendas
+        const sales = await SaleHistory.find({}).sort({ confirmedAt: -1 });
+        
+        // Agrupa por discordId
+        const depositsMap = {};
+        for (const sale of sales) {
+            const discordId = sale.discordId || "unknown";
+            const discordTag = sale.discordTag || "Unknown";
+            const amount = sale.price || 0;
+            
+            if (!depositsMap[discordId]) {
+                depositsMap[discordId] = {
+                    discordId,
+                    discordTag,
+                    totalSpent: 0,
+                    purchaseCount: 0,
+                    lastPurchase: sale.confirmedAt
+                };
+            }
+            
+            depositsMap[discordId].totalSpent += amount;
+            depositsMap[discordId].purchaseCount += 1;
+            
+            // Atualiza última compra (se for mais recente)
+            if (sale.confirmedAt > depositsMap[discordId].lastPurchase) {
+                depositsMap[discordId].lastPurchase = sale.confirmedAt;
+            }
+        }
+        
+        // Ordena por total gasto e limita
+        const topDeposits = Object.values(depositsMap)
+            .sort((a, b) => b.totalSpent - a.totalSpent)
+            .slice(0, limit)
+            .map((d, index) => ({
+                rank: index + 1,
+                discordTag: d.discordTag,
+                totalSpent: d.totalSpent,
+                purchaseCount: d.purchaseCount,
+                lastPurchase: d.lastPurchase
+            }));
+        
+        res.json({
+            success: true,
+            data: topDeposits,
+            count: topDeposits.length,
+            timestamp: new Date()
+        });
+        
+    } catch (error) {
+        console.error("[TOP DEPOSITS] Erro:", error.message);
+        res.status(500).json({
+            success: false,
+            error: "Erro ao buscar top deposits"
+        });
+    }
+});
+
 app.post("/api/buy", requireAuth, async (req, res) => {
     const { hours } = req.body; // Agora recebe horas diretamente
     

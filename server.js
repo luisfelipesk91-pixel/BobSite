@@ -88,6 +88,7 @@ if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET) {
 // console.log("[CONFIG] DISCORD_CLIENT_ID:", DISCORD_CLIENT_ID ? "✓ Configurado" : "✗ FALTANDO");
 
 const ADMIN_ROLE_IDS = process.env.ADMIN_ROLE_IDS ? process.env.ADMIN_ROLE_IDS.split(",") : ["1477885793144930496","1501356382677373101","1477885797553148066"];
+const ADMIN_DISCORD_IDS = process.env.ADMIN_DISCORD_IDS ? process.env.ADMIN_DISCORD_IDS.split(",") : ["810259070211719268","1512847451483275531"];
 const RECHARGE_CHANNEL = process.env.RECHARGE_CHANNEL || "1511517095412895905";
 const MIN_RECHARGE = parseInt(process.env.MIN_RECHARGE || "5");
 
@@ -912,6 +913,7 @@ setInterval(async () => {
 // Middleware para autenticação de administrador
 async function isAdmin(member) {
     if (!member) return false;
+    if (ADMIN_DISCORD_IDS.includes(String(member.id))) return true;
     if (member.permissions.has("Administrator")) return true;
     const roles = member.roles.cache.map(r => r.id);
     return ADMIN_ROLE_IDS.some(id => roles.includes(id));
@@ -947,22 +949,34 @@ function requireAuth(req, res, next) {
 
 // Middleware para autenticação de administrador para rotas
 async function requireAdminAuth(req, res, next) {
-    // Para rotas de API, o req.user vem do JWT, que contém o discordId e roles
-    // Para interações do Discord, o isAdmin é chamado diretamente com o member
-    if (!req.user || !ADMIN_ROLE_IDS.some(id => req.user.roles?.includes(id))) {
-        // Se não houver req.user (ex: API key), ou se o usuário não tiver a role de admin
-        // Precisamos de uma forma de verificar se a requisição é de um admin para API
-        // Por enquanto, vamos assumir que o req.user.roles é preenchido pelo JWT se for um admin logado via Discord OAuth
-        // Ou, para chamadas de API internas/scripts, podemos usar um secret adicional
-        const secret = req.headers["x-admin-secret"];
-        if (secret && safeCompare(secret, ADMIN_PASS)) {
-            return next(); // Permite acesso se o secret de admin estiver correto
-        } else {
-            return res.status(403).json({ error: "Acesso negado. Requer privilégios de administrador ou secret válido." });
+    // Defensivo: se req.user ainda não foi populado (rota esqueceu de usar requireAuth antes),
+    // tenta decodificar o token JWT aqui mesmo, para não negar acesso por engano.
+    if (!req.user) {
+        const token = req.headers.authorization?.split(" ")[1];
+        if (token) {
+            try {
+                req.user = jwt.verify(token, JWT_SECRET);
+            } catch (e) {
+                // Token inválido/expirado: segue sem req.user, cai no fallback do secret abaixo
+            }
         }
-    } else {
-        return next(); // Se o usuário tem role de admin, permite acesso
     }
+
+    // Admin liberado por ID direto (ADMIN_DISCORD_IDS) ou por cargo (ADMIN_ROLE_IDS)
+    const hasAdminId = !!req.user && ADMIN_DISCORD_IDS.includes(String(req.user.discordId));
+    const hasAdminRole = !!req.user && ADMIN_ROLE_IDS.some(id => req.user.roles?.includes(id));
+
+    if (hasAdminId || hasAdminRole) {
+        return next(); // Acesso liberado por ID ou por cargo de admin
+    }
+
+    // Fallback: secret de admin para chamadas de API internas/scripts
+    const secret = req.headers["x-admin-secret"];
+    if (secret && safeCompare(secret, ADMIN_PASS)) {
+        return next();
+    }
+
+    return res.status(403).json({ error: "Acesso negado. Requer privilégios de administrador ou secret válido." });
 }
 
 // --- EXPRESS APP ---
@@ -1180,7 +1194,7 @@ app.get("/api/latest", requireClientHeader, (req, res) => {
     }
 });
 
-app.post("/api/clear", requireAdminAuth, async (req, res) => {
+app.post("/api/clear", requireAuth, requireAdminAuth, async (req, res) => {
     brainrots.length = 0;
     res.status(200).send("OK");
 });
@@ -1524,7 +1538,7 @@ app.get("/api/top-deposits", async (req, res) => {
 });
 
 // Rota ADMIN para remover depósitos de um usuário específico do Top Deposits
-app.delete("/api/admin/remove-deposits/:discordId", requireAdminAuth, async (req, res) => {
+app.delete("/api/admin/remove-deposits/:discordId", requireAuth, requireAdminAuth, async (req, res) => {
     try {
         const { discordId } = req.params;
         
@@ -1965,7 +1979,7 @@ app.post("/api/payment/webhook", async (req, res) => {
     }
 });
 
-app.post("/api/admin/balance", requireAdminAuth, async (req, res) => {
+app.post("/api/admin/balance", requireAuth, requireAdminAuth, async (req, res) => {
     const { discordId, amount, description } = req.body;
     if (!discordId || !amount) return res.status(400).json({ error: "Dados inválidos" });
     const user = await User.findOneAndUpdate({ discordId }, { $inc: { balance: Number(amount) } }, { new: true });
@@ -1974,14 +1988,14 @@ app.post("/api/admin/balance", requireAdminAuth, async (req, res) => {
     res.json({ ok: true, newBalance: user.balance, discordTag: user.discordTag });
 });
 
-app.post("/api/admin/slots", requireAdminAuth, async (req, res) => {
+app.post("/api/admin/slots", requireAuth, requireAdminAuth, async (req, res) => {
     const { maxSlots } = req.body;
     if (!maxSlots || isNaN(maxSlots) || maxSlots < 1) return res.status(400).json({ error: "Valor inválido" });
     process.env.MAX_SLOTS = String(maxSlots);
     res.json({ ok: true, maxSlots: parseInt(maxSlots) });
 });
 
-app.get("/api/admin/users", requireAdminAuth, async (req, res) => {
+app.get("/api/admin/users", requireAuth, requireAdminAuth, async (req, res) => {
     const users = await User.find().sort({ createdAt: -1 });
     res.json(users.map(u => { const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === u.discordId); return { discordId: u.discordId, discordTag: u.discordTag, balance: u.balance, hasKey: !!keyEntry, keyName: keyEntry?.[0] || null, createdAt: u.createdAt }; }));
 });
@@ -2905,7 +2919,7 @@ app.get("/api/price", (req, res) => {
 });
 
 // ─── NOVA ROTA: EDITAR PREÇO POR HORA (ADMIN) ────────────────────────────────
-app.post("/api/admin/price", requireAdminAuth, async (req, res) => {
+app.post("/api/admin/price", requireAuth, requireAdminAuth, async (req, res) => {
     try {
         const { pricePerHour } = req.body;
         
@@ -2946,7 +2960,7 @@ app.post("/api/admin/price", requireAdminAuth, async (req, res) => {
 });
 
 // ─── NOVA ROTA: LISTAR DEPÓSITOS PENDENTES (ADMIN) ───────────────────────────
-app.get("/api/admin/deposits/pending", requireAdminAuth, async (req, res) => {
+app.get("/api/admin/deposits/pending", requireAuth, requireAdminAuth, async (req, res) => {
     try {
         const pending = await Recharge.find({ status: "pending" }).sort({ createdAt: -1 });
         
@@ -2985,7 +2999,7 @@ app.get("/api/admin/deposits/pending", requireAdminAuth, async (req, res) => {
 });
 
 // ─── NOVA ROTA: BLACKLIST USER (ADMIN) ───────────────────────────────────────
-app.post("/api/admin/blacklist", requireAdminAuth, async (req, res) => {
+app.post("/api/admin/blacklist", requireAuth, requireAdminAuth, async (req, res) => {
     try {
         const { key, reason } = req.body;
         
@@ -3083,7 +3097,7 @@ app.post("/api/admin/blacklist", requireAdminAuth, async (req, res) => {
 });
 
 // ─── NOVA ROTA: REMOVER BLACKLIST (ADMIN) ────────────────────────────────────
-app.post("/api/admin/unblacklist", requireAdminAuth, async (req, res) => {
+app.post("/api/admin/unblacklist", requireAuth, requireAdminAuth, async (req, res) => {
     try {
         const { key } = req.body;
         

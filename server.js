@@ -174,6 +174,9 @@ const UserSchema = new mongoose.Schema({
     discordId:  { type: String, required: true, unique: true },
     discordTag: String, avatar: String,
     balance:    { type: Number, default: 0 },
+    blacklisted: { type: Boolean, default: false },
+    blacklistReason: { type: String, default: null },
+    blacklistedAt: { type: Date, default: null },
     createdAt:  { type: Date, default: Date.now },
 });
 const User = mongoose.model("User", UserSchema);
@@ -1282,7 +1285,7 @@ app.get("/auth/me", requireAuth, async (req, res) => {
             timeLeft: kd.expiry === Infinity ? "Lifetime" : kd.paused ? formatTime(kd.remaining) : formatTime(kd.expiry - now),
         };
     }
-    res.json({ discordId: user.discordId, discordTag: user.discordTag, avatar: user.avatar, balance: user.balance, key: keyData, plans: PLANS.filter(p => p.active) });
+    res.json({ discordId: user.discordId, discordTag: user.discordTag, avatar: user.avatar, balance: user.balance, key: keyData, plans: PLANS.filter(p => p.active), blacklisted: user.blacklisted || false, blacklistReason: user.blacklistReason || null });
 });
 
 app.get("/api/online", async (req, res) => {
@@ -1368,12 +1371,14 @@ app.post("/api/buy", requireAuth, async (req, res) => {
         return res.status(400).json({ error: "Mínimo de 1 hora" });
     }
     
-    // Preço: R$2,50 por hora
-    const pricePerHour = 3.00;
-    const totalPrice = hours * pricePerHour;
-    
     const user = await User.findOne({ discordId: req.user.discordId });
     if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+
+    if (user.blacklisted) {
+        return res.status(403).json({ error: `Sua conta está banida e não pode realizar compras. Motivo: ${user.blacklistReason || "Violação dos termos de uso."}` });
+    }
+
+    const totalPrice = hours * PRICE_PER_HOUR;
     if (user.balance < totalPrice) return res.status(400).json({ error: "Saldo insuficiente" });
     
     user.balance -= totalPrice;
@@ -1988,6 +1993,22 @@ app.post("/api/admin/balance", requireAuth, requireAdminAuth, async (req, res) =
     const txType = Number(amount) >= 0 ? "admin_credit" : "admin_debit";
     await Transaction.create({ discordId, type: txType, amount: Number(amount), description: description || "Ajuste de saldo (admin)" });
     res.json({ ok: true, newBalance: user.balance, discordTag: user.discordTag });
+});
+
+// Remove saldo de um usuário (sempre subtrai; o front-end manda o valor positivo a ser removido)
+app.post("/api/admin/balance/remove", requireAuth, requireAdminAuth, async (req, res) => {
+    const { discordId, amount, description } = req.body;
+    if (!discordId || !amount || Number(amount) <= 0) return res.status(400).json({ error: "Dados inválidos" });
+
+    const user = await User.findOne({ discordId });
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
+
+    const removeAmount = Math.min(Number(amount), user.balance); // não deixa saldo negativo
+    user.balance -= removeAmount;
+    await user.save();
+
+    await Transaction.create({ discordId, type: "admin_debit", amount: -removeAmount, description: description || "Remoção de saldo (admin)" });
+    res.json({ ok: true, newBalance: user.balance, discordTag: user.discordTag, removed: removeAmount });
 });
 
 app.post("/api/admin/slots", requireAuth, requireAdminAuth, async (req, res) => {
@@ -3090,46 +3111,52 @@ app.get("/api/admin/deposits/pending", requireAuth, requireAdminAuth, async (req
     }
 });
 
-// ─── NOVA ROTA: BLACKLIST USER (ADMIN) ───────────────────────────────────────
+// ─── NOVA ROTA: BLACKLIST USER (ADMIN) — por Discord ID ─────────────────────
 app.post("/api/admin/blacklist", requireAuth, requireAdminAuth, async (req, res) => {
     try {
-        const { key, reason } = req.body;
-        
-        if (!key) {
-            return res.status(400).json({ error: "Key é obrigatória" });
+        const { discordId, reason } = req.body;
+
+        if (!discordId) {
+            return res.status(400).json({ error: "ID do Discord é obrigatório" });
         }
-        
+
         if (!reason || reason.trim() === "") {
             return res.status(400).json({ error: "Motivo do banimento é obrigatório" });
         }
-        
-        // Busca a key
-        const keyName = findKey(key);
-        
-        if (!keyName) {
-            return res.status(404).json({ error: "Key não encontrada" });
+
+        const user = await User.findOne({ discordId: String(discordId) });
+        if (!user) {
+            return res.status(404).json({ error: "Usuário não encontrado. Ele precisa ter logado no site ao menos uma vez." });
         }
-        
-        const keyData = keys[keyName];
-        
-        // Verifica se já está blacklisted
-        if (keyData.blacklisted) {
-            return res.status(400).json({ 
-                error: "Key já está banida",
-                reason: keyData.blacklistReason,
-                bannedAt: keyData.blacklistedAt
+
+        if (user.blacklisted) {
+            return res.status(400).json({
+                error: "Usuário já está banido",
+                reason: user.blacklistReason,
+                bannedAt: user.blacklistedAt
             });
         }
-        
-        // Aplica blacklist
-        keys[keyName].blacklisted = true;
-        keys[keyName].blacklistReason = reason.trim();
-        keys[keyName].blacklistedAt = new Date();
-        keys[keyName].hwidLocked = true; // Trava o HWID também
-        await saveKey(keyName);
-        
-        console.log(`[ADMIN] ⛔ Key BANIDA: ${keyName} | Motivo: ${reason}`);
-        
+
+        // Bane a conta (impede compras e login)
+        user.blacklisted = true;
+        user.blacklistReason = reason.trim();
+        user.blacklistedAt = new Date();
+        await user.save();
+
+        // Se o usuário tiver uma key ativa, bane ela também (trava o uso no jogo)
+        const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === String(discordId));
+        let keyName = null;
+        if (keyEntry) {
+            keyName = keyEntry[0];
+            keys[keyName].blacklisted = true;
+            keys[keyName].blacklistReason = reason.trim();
+            keys[keyName].blacklistedAt = new Date();
+            keys[keyName].hwidLocked = true; // Trava o HWID também
+            await saveKey(keyName);
+        }
+
+        console.log(`[ADMIN] ⛔ Usuário BANIDO: ${discordId} (${user.discordTag}) | Key: ${keyName || "nenhuma"} | Motivo: ${reason}`);
+
         // Envia notificação no canal de logs
         if (LOGS_CHANNEL_ID && clientLogs.isReady()) {
             try {
@@ -3139,9 +3166,8 @@ app.post("/api/admin/blacklist", requireAuth, requireAdminAuth, async (req, res)
                         .setColor(COLORS.danger)
                         .setTitle("⛔ Usuário Banido")
                         .addFields(
-                            { name: "Key", value: `\`${keyName}\``, inline: true },
-                            { name: "Discord", value: keyData.discordId ? `<@${keyData.discordId}>` : "N/A", inline: true },
-                            { name: "HWID", value: keyData.hwid ? `\`${keyData.hwid.substring(0, 16)}...\`` : "N/A", inline: false },
+                            { name: "Discord", value: `<@${discordId}> (${user.discordTag})`, inline: true },
+                            { name: "Key", value: keyName ? `\`${keyName}\`` : "Nenhuma", inline: true },
                             { name: "Motivo", value: reason, inline: false }
                         )
                         .setTimestamp();
@@ -3151,76 +3177,81 @@ app.post("/api/admin/blacklist", requireAuth, requireAdminAuth, async (req, res)
                 console.error("[ADMIN] Erro ao enviar notificação:", e.message);
             }
         }
-        
+
         // Tenta enviar DM ao usuário
-        if (keyData.discordId) {
-            try {
-                const userObj = await fetchUserFromAnyClient(keyData.discordId);
-                if (userObj) {
-                    const embed = new EmbedBuilder()
-                        .setColor(COLORS.danger)
-                        .setTitle("⛔ Conta Banida")
-                        .setDescription("Sua conta foi banida do Bob Joiner.")
-                        .addFields(
-                            { name: "Motivo", value: reason, inline: false },
-                            { name: "Suporte", value: "Entre em contato com o administrador para mais informações.", inline: false }
-                        )
-                        .setFooter({ text: "Bob Notifier" })
-                        .setTimestamp();
-                    await userObj.send({ embeds: [embed] });
-                }
-            } catch (e) {
-                console.error("[ADMIN] Erro ao enviar DM:", e.message);
+        try {
+            const userObj = await fetchUserFromAnyClient(discordId);
+            if (userObj) {
+                const embed = new EmbedBuilder()
+                    .setColor(COLORS.danger)
+                    .setTitle("⛔ Conta Banida")
+                    .setDescription("Sua conta foi banida do Bob Joiner e você não poderá mais comprar acesso.")
+                    .addFields(
+                        { name: "Motivo", value: reason, inline: false },
+                        { name: "Suporte", value: "Entre em contato com o administrador para mais informações.", inline: false }
+                    )
+                    .setFooter({ text: "Bob Notifier" })
+                    .setTimestamp();
+                await userObj.send({ embeds: [embed] });
             }
+        } catch (e) {
+            console.error("[ADMIN] Erro ao enviar DM:", e.message);
         }
-        
-        res.json({ 
-            ok: true, 
+
+        res.json({
+            ok: true,
+            discordId,
+            discordTag: user.discordTag,
             keyName,
             reason,
-            message: `Key ${keyName} foi banida com sucesso`,
-            discordId: keyData.discordId
+            message: `Usuário ${user.discordTag} foi banido com sucesso`
         });
-        
+
     } catch (e) {
         console.error("[ADMIN] Erro ao banir usuário:", e.message);
         res.status(500).json({ error: "Erro ao banir usuário" });
     }
 });
 
-// ─── NOVA ROTA: REMOVER BLACKLIST (ADMIN) ────────────────────────────────────
+// ─── NOVA ROTA: REMOVER BLACKLIST (ADMIN) — por Discord ID ──────────────────
 app.post("/api/admin/unblacklist", requireAuth, requireAdminAuth, async (req, res) => {
     try {
-        const { key } = req.body;
-        
-        if (!key) {
-            return res.status(400).json({ error: "Key é obrigatória" });
+        const { discordId } = req.body;
+
+        if (!discordId) {
+            return res.status(400).json({ error: "ID do Discord é obrigatório" });
         }
-        
-        // Busca a key
-        const keyName = findKey(key);
-        
-        if (!keyName) {
-            return res.status(404).json({ error: "Key não encontrada" });
+
+        const user = await User.findOne({ discordId: String(discordId) });
+        if (!user) {
+            return res.status(404).json({ error: "Usuário não encontrado" });
         }
-        
-        const keyData = keys[keyName];
-        
-        // Verifica se está blacklisted
-        if (!keyData.blacklisted) {
-            return res.status(400).json({ error: "Key não está banida" });
+
+        if (!user.blacklisted) {
+            return res.status(400).json({ error: "Usuário não está banido" });
         }
-        
-        // Remove blacklist
-        keys[keyName].blacklisted = false;
-        keys[keyName].blacklistReason = null;
-        keys[keyName].blacklistedAt = null;
-        keys[keyName].hwidLocked = false; // Destrava o HWID
-        keys[keyName].hwid = null; // Reseta o HWID
-        await saveKey(keyName);
-        
-        console.log(`[ADMIN] ✅ Key DESBANIDA: ${keyName}`);
-        
+
+        // Remove blacklist da conta
+        user.blacklisted = false;
+        user.blacklistReason = null;
+        user.blacklistedAt = null;
+        await user.save();
+
+        // Se ele tiver uma key banida, desbane ela também
+        const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === String(discordId));
+        let keyName = null;
+        if (keyEntry && keyEntry[1].blacklisted) {
+            keyName = keyEntry[0];
+            keys[keyName].blacklisted = false;
+            keys[keyName].blacklistReason = null;
+            keys[keyName].blacklistedAt = null;
+            keys[keyName].hwidLocked = false; // Destrava o HWID
+            keys[keyName].hwid = null; // Reseta o HWID
+            await saveKey(keyName);
+        }
+
+        console.log(`[ADMIN] ✅ Usuário DESBANIDO: ${discordId} (${user.discordTag})`);
+
         // Envia notificação no canal de logs
         if (LOGS_CHANNEL_ID && clientLogs.isReady()) {
             try {
@@ -3230,8 +3261,8 @@ app.post("/api/admin/unblacklist", requireAuth, requireAdminAuth, async (req, re
                         .setColor(COLORS.success)
                         .setTitle("✅ Usuário Desbanido")
                         .addFields(
-                            { name: "Key", value: `\`${keyName}\``, inline: true },
-                            { name: "Discord", value: keyData.discordId ? `<@${keyData.discordId}>` : "N/A", inline: true }
+                            { name: "Discord", value: `<@${discordId}> (${user.discordTag})`, inline: true },
+                            { name: "Key", value: keyName ? `\`${keyName}\`` : "Nenhuma", inline: true }
                         )
                         .setTimestamp();
                     await channel.send({ embeds: [embed] });
@@ -3240,13 +3271,15 @@ app.post("/api/admin/unblacklist", requireAuth, requireAdminAuth, async (req, re
                 console.error("[ADMIN] Erro ao enviar notificação:", e.message);
             }
         }
-        
-        res.json({ 
-            ok: true, 
+
+        res.json({
+            ok: true,
+            discordId,
+            discordTag: user.discordTag,
             keyName,
-            message: `Key ${keyName} foi desbanida com sucesso`
+            message: `Usuário ${user.discordTag} foi desbanido com sucesso`
         });
-        
+
     } catch (e) {
         console.error("[ADMIN] Erro ao desbanir usuário:", e.message);
         res.status(500).json({ error: "Erro ao desbanir usuário" });

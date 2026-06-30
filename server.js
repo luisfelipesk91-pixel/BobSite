@@ -1316,15 +1316,39 @@ app.post("/api/auth", requireClientHeader, async (req, res) => {
         console.log(`[AUTH] Key auto-gerada ${keyName} associada ao Discord ID ${req.user.discordId}`);
     }
 
+    // ✅ LOG COMPLETO DE AUTENTICAÇÃO BEM-SUCEDIDA
     const timeLeft = data.expiry === Infinity ? Infinity : data.expiry - now;
+    console.log(`[AUTH] ✅ LOGIN VÁLIDO | Key: ${keyName} | HWID: ${hwid} | IP: ${req.ip} | Discord: ${data.discordId || 'N/A'} | Tempo: ${timeLeft === Infinity ? 'LIFETIME' : formatTime(timeLeft)}`);
+    
     res.json({ ok: true, timeLeft, isLifetime: data.expiry === Infinity });
 });
 
 app.post("/api/presence", requireClientHeader, async (req, res) => {
-    console.log("[PRESENCE DEBUG] Requisição recebida:", JSON.stringify(req.body));
     const { key, name, displayName, userId, jobId } = req.body;
+    const hwid = req.headers['x-hwid'] || 'unknown';
+    const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+    
     const keyName = findKey(key);
-    if (!keyName) return res.status(401).json({ error: "Key inválida." });
+    
+    // 🚨 INTRUSÃO: Key inválida
+    if (!keyName) {
+        console.error(`[SECURITY] 🚨 PRESENCE com KEY INVÁLIDA! Key: "${key}" | HWID: ${hwid} | IP: ${ip} | Name: ${name}`);
+        
+        await IntruderAttempt.create({
+            type: 'INVALID_KEY',
+            keyName: key,
+            hwid: hwid || 'unknown',
+            discordId: 'unknown',
+            ip: ip,
+            userAgent: req.headers['user-agent'] || 'unknown',
+            details: `Tentativa /api/presence com key inválida "${key}" | Name: ${name} | JobID: ${jobId}`
+        });
+        
+        return res.status(401).json({ error: "Key inválida." });
+    }
+
+    // ✅ LOG DETALHADO de tentativas VÁLIDAS (com HWID completo e IP)
+    console.log(`[PRESENCE] ✅ Key: ${keyName} | HWID: ${hwid} | IP: ${ip} | JobID: ${jobId?.substring(0, 8)}... | User: ${userId?.substring(0, 6)}... | Name: ${name}`);
 
     // ✅ SEMPRE usar lowercase para consistência + salva displayName e userId
     const keyLower = keyName.toLowerCase();
@@ -2671,7 +2695,23 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
             return; 
         }
         
-        if (id === "logs_listkeys") { 
+        if (id === "logs_listkeys") {
+            // 🔒 PROTEÇÃO: Apenas admins podem listar TODAS as keys
+            if (!await isAdmin(interaction.member)) {
+                console.error(`[SECURITY] 🚨 Usuário NÃO-ADMIN tentou listar todas as keys! User: ${interaction.user.tag} (${interaction.user.id})`);
+                
+                await IntruderAttempt.create({
+                    type: 'UNAUTHORIZED_ACTION',
+                    keyName: 'N/A',
+                    hwid: 'discord-action',
+                    discordId: interaction.user.id,
+                    details: `Tentativa de listar todas as keys sem permissão | User: ${interaction.user.tag}`
+                });
+                
+                await interaction.reply({ content: "❌ Você não tem permissão para listar todas as keys!", flags: 64 }).catch(() => {});
+                return;
+            }
+            
             await interaction.deferReply({ flags: 64 }).catch(() => {}); 
             
             // Filtra keys que não sejam auto-keys expiradas (expiry=0 e paused=true)
@@ -2940,7 +2980,23 @@ async function handleLogsModal(interaction) {
 
     if (id === "modal_lifetime") {
         const name = getField("key_name").trim();
-        const { msg } = await opCreateLifetime(name);
+        
+        // 🔒 PROTEÇÃO: Apenas admins podem criar keys LIFETIME
+        if (!await isAdmin(interaction.member)) {
+            console.error(`[SECURITY] 🚨 Usuário NÃO-ADMIN tentou criar key LIFETIME! User: ${interaction.user.tag} (${interaction.user.id}) | Key: ${name}`);
+            
+            await IntruderAttempt.create({
+                type: 'UNAUTHORIZED_ACTION',
+                keyName: name,
+                hwid: 'discord-action',
+                discordId: interaction.user.id,
+                details: `Tentativa de criar key LIFETIME sem permissão | User: ${interaction.user.tag}`
+            });
+            
+            return interaction.editReply({ content: "❌ Você não tem permissão para criar keys LIFETIME!" }).catch(() => {});
+        }
+        
+        const { msg } = await opCreateLifetime(name, interaction.user.id, interaction.user.tag);
         return interaction.editReply({ content: msg }).catch(() => {});
     }
 
@@ -3498,6 +3554,45 @@ app.get("/api/admin/blacklisted-hwids", requireAuth, requireAdminAuth, async (re
     } catch (e) {
         console.error("[API] Erro em /api/admin/blacklisted-hwids:", e.message);
         res.status(500).json({ error: "Erro ao listar HWIDs banidos" });
+    }
+});
+
+// ─── NOVA ROTA: BANIR HWID DIRETAMENTE (ADMIN) ──────────────────────────────
+app.post("/api/admin/blacklist-hwid", requireAuth, requireAdminAuth, async (req, res) => {
+    try {
+        const { hwid, reason } = req.body;
+        
+        if (!hwid) {
+            return res.status(400).json({ error: "HWID é obrigatório" });
+        }
+        
+        const alreadyBanned = await BlacklistedHWID.findOne({ hwid });
+        if (alreadyBanned) {
+            return res.status(400).json({ error: "HWID já está na blacklist" });
+        }
+        
+        await BlacklistedHWID.create({
+            hwid,
+            originalDiscordId: 'unknown',
+            reason: reason || 'Banimento manual por admin',
+            bannedAt: new Date()
+        });
+        
+        // ✅ AUDITORIA
+        await logAdminAction(
+            req.user.discordId,
+            req.user.discordTag,
+            "BAN_HWID_DIRECT",
+            { hwid: hwid.substring(0, 16) + "...", reason },
+            req.ip
+        );
+        
+        console.log(`[SECURITY] 🚨 HWID BANIDO DIRETAMENTE: ${hwid.substring(0, 16)}... por ${req.user.discordTag} | Motivo: ${reason || 'Manual'}`);
+        
+        res.json({ ok: true, message: "HWID banido globalmente" });
+    } catch (e) {
+        console.error("[API] Erro em /api/admin/blacklist-hwid:", e.message);
+        res.status(500).json({ error: "Erro ao banir HWID" });
     }
 });
 

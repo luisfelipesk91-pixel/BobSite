@@ -1490,9 +1490,10 @@ app.post("/api/get-role", requireAuth, async (req, res) => {
 // Rota para Top Deposits (ranking dos maiores depositantes)
 app.get("/api/top-deposits", async (req, res) => {
     try {
-        // Agrupa transações de depósito por usuário e soma o total
+        // Agrupa transações de depósito real (PIX/cripto automático + recarga manual confirmada) por usuário
+        // Não inclui ajustes manuais de saldo feitos pelo admin (admin_credit/admin_debit)
         const topDeposits = await Transaction.aggregate([
-            { $match: { type: "deposit", amount: { $gt: 0 } } },
+            { $match: { type: { $in: ["deposit", "recharge"] }, amount: { $gt: 0 } } },
             { $group: {
                 _id: "$discordId",
                 totalDeposited: { $sum: "$amount" },
@@ -1984,7 +1985,8 @@ app.post("/api/admin/balance", requireAuth, requireAdminAuth, async (req, res) =
     if (!discordId || !amount) return res.status(400).json({ error: "Dados inválidos" });
     const user = await User.findOneAndUpdate({ discordId }, { $inc: { balance: Number(amount) } }, { new: true });
     if (!user) return res.status(404).json({ error: "Usuário não encontrado. Peça para ele logar primeiro." });
-    await Transaction.create({ discordId, type: "deposit", amount: Number(amount), description: description || "Depósito admin" });
+    const txType = Number(amount) >= 0 ? "admin_credit" : "admin_debit";
+    await Transaction.create({ discordId, type: txType, amount: Number(amount), description: description || "Ajuste de saldo (admin)" });
     res.json({ ok: true, newBalance: user.balance, discordTag: user.discordTag });
 });
 
@@ -1998,6 +2000,96 @@ app.post("/api/admin/slots", requireAuth, requireAdminAuth, async (req, res) => 
 app.get("/api/admin/users", requireAuth, requireAdminAuth, async (req, res) => {
     const users = await User.find().sort({ createdAt: -1 });
     res.json(users.map(u => { const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === u.discordId); return { discordId: u.discordId, discordTag: u.discordTag, balance: u.balance, hasKey: !!keyEntry, keyName: keyEntry?.[0] || null, createdAt: u.createdAt }; }));
+});
+
+// Pausa TODAS as keys ativas (não pausadas)
+app.post("/api/admin/pause-all", requireAuth, requireAdminAuth, async (req, res) => {
+    try {
+        let count = 0;
+        for (const k of Object.keys(keys)) {
+            const d = keys[k];
+            if (!d.paused) {
+                d.remaining = d.expiry === Infinity ? Infinity : d.expiry - Date.now();
+                d.paused = true;
+                await saveKey(k);
+                count++;
+            }
+        }
+        console.log(`[ADMIN] ⏸️ ${count} keys pausadas (pause-all) por ${req.user.discordId}`);
+        res.json({ ok: true, paused: count });
+    } catch (e) {
+        console.error("[ADMIN] Erro em pause-all:", e.message);
+        res.status(500).json({ error: "Erro ao pausar keys" });
+    }
+});
+
+// Despausa TODAS as keys que estão pausadas
+app.post("/api/admin/unpause-all", requireAuth, requireAdminAuth, async (req, res) => {
+    try {
+        let count = 0;
+        for (const k of Object.keys(keys)) {
+            const d = keys[k];
+            if (d.paused) {
+                d.expiry = d.remaining === Infinity ? Infinity : Date.now() + d.remaining;
+                d.paused = false;
+                await saveKey(k);
+                count++;
+            }
+        }
+        console.log(`[ADMIN] ▶️ ${count} keys retomadas (unpause-all) por ${req.user.discordId}`);
+        res.json({ ok: true, unpaused: count });
+    } catch (e) {
+        console.error("[ADMIN] Erro em unpause-all:", e.message);
+        res.status(500).json({ error: "Erro ao despausar keys" });
+    }
+});
+
+// Pausa a key de um usuário específico, pelo Discord ID
+app.post("/api/admin/pause-user", requireAuth, requireAdminAuth, async (req, res) => {
+    try {
+        const { discordId } = req.body;
+        if (!discordId) return res.status(400).json({ error: "Discord ID é obrigatório" });
+
+        const entry = Object.entries(keys).find(([, d]) => d.discordId === String(discordId));
+        if (!entry) return res.status(404).json({ error: "Esse usuário não possui uma key ativa" });
+
+        const [keyName, d] = entry;
+        if (d.paused) return res.status(400).json({ error: "A key desse usuário já está pausada" });
+
+        d.remaining = d.expiry === Infinity ? Infinity : d.expiry - Date.now();
+        d.paused = true;
+        await saveKey(keyName);
+
+        console.log(`[ADMIN] ⏸️ Key ${keyName} pausada (discordId: ${discordId}) por ${req.user.discordId}`);
+        res.json({ ok: true, keyName });
+    } catch (e) {
+        console.error("[ADMIN] Erro em pause-user:", e.message);
+        res.status(500).json({ error: "Erro ao pausar key" });
+    }
+});
+
+// Despausa a key de um usuário específico, pelo Discord ID
+app.post("/api/admin/unpause-user", requireAuth, requireAdminAuth, async (req, res) => {
+    try {
+        const { discordId } = req.body;
+        if (!discordId) return res.status(400).json({ error: "Discord ID é obrigatório" });
+
+        const entry = Object.entries(keys).find(([, d]) => d.discordId === String(discordId));
+        if (!entry) return res.status(404).json({ error: "Esse usuário não possui uma key ativa" });
+
+        const [keyName, d] = entry;
+        if (!d.paused) return res.status(400).json({ error: "A key desse usuário não está pausada" });
+
+        d.expiry = d.remaining === Infinity ? Infinity : Date.now() + d.remaining;
+        d.paused = false;
+        await saveKey(keyName);
+
+        console.log(`[ADMIN] ▶️ Key ${keyName} retomada (discordId: ${discordId}) por ${req.user.discordId}`);
+        res.json({ ok: true, keyName });
+    } catch (e) {
+        console.error("[ADMIN] Erro em unpause-user:", e.message);
+        res.status(500).json({ error: "Erro ao despausar key" });
+    }
 });
 
 // ─── ONLINE MONITORING ───────────────────────────────────────────────────────

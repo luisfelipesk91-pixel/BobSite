@@ -3848,12 +3848,141 @@ process.on("uncaughtException", (err) => {
 });
 
 // Socket.io para atualizações em tempo real
+// 🔒 Mapa de conexões ativas por key (previne múltiplas conexões simultâneas)
+const activeSocketConnections = new Map(); // keyName -> socket.id
+
+// 🔒 Rate limiting: tentativas de conexão por IP
+const socketConnectionAttempts = new Map(); // ip -> { count, lastAttempt }
+const SOCKET_RATE_LIMIT = 5; // máximo de tentativas
+const SOCKET_RATE_WINDOW = 60000; // 1 minuto
+
+// 🔒 AUTENTICAÇÃO: Middleware para verificar token/key antes de permitir conexão
+io.use((socket, next) => {
+    const ip = socket.handshake.address || socket.request.connection.remoteAddress || 'unknown';
+    const token = socket.handshake.auth.token;
+    const keyHeader = socket.handshake.auth.key;
+    const keyQuery = socket.handshake.query.key;  // Key via URL query param (Roblox)
+    
+    // ✅ RATE LIMITING por IP
+    const now = Date.now();
+    const attempts = socketConnectionAttempts.get(ip) || { count: 0, lastAttempt: 0 };
+    
+    if (now - attempts.lastAttempt < SOCKET_RATE_WINDOW) {
+        if (attempts.count >= SOCKET_RATE_LIMIT) {
+            console.error(`[SOCKET.IO] 🚨 RATE LIMIT! IP bloqueado temporariamente: ${ip}`);
+            return next(new Error("Muitas tentativas de conexão. Tente novamente em 1 minuto."));
+        }
+        attempts.count++;
+    } else {
+        attempts.count = 1;
+    }
+    attempts.lastAttempt = now;
+    socketConnectionAttempts.set(ip, attempts);
+    
+    // Permite conexão se tiver token JWT válido (usuário logado no site)
+    if (token) {
+        try {
+            jwt.verify(token, JWT_SECRET);
+            console.log(`[SOCKET.IO] ✅ Cliente autenticado via JWT | IP: ${ip}`);
+            socket.data.isWebUser = true;
+            socket.data.ip = ip;
+            return next();
+        } catch (e) {
+            console.warn(`[SOCKET.IO] ⚠️ Token JWT inválido | IP: ${ip}`);
+        }
+    }
+    
+    // Permite conexão se tiver key válida via header (script Roblox)
+    if (keyHeader) {
+        const keyName = findKey(keyHeader);
+        if (keyName && keys[keyName]) {
+            // ✅ VERIFICAÇÃO: Já existe conexão ativa com essa key?
+            if (activeSocketConnections.has(keyName)) {
+                console.error(`[SOCKET.IO] 🚨 BLOQUEADO! Key já está em uso: ${keyName} | IP tentando: ${ip}`);
+                
+                // Registra tentativa suspeita
+                IntruderAttempt.create({
+                    type: 'UNAUTHORIZED_ACTION',
+                    keyName: keyName,
+                    hwid: 'socket-connection',
+                    discordId: keys[keyName].discordId || 'unknown',
+                    ip: ip,
+                    userAgent: socket.handshake.headers['user-agent'] || 'unknown',
+                    details: `Tentativa de conectar Socket.io com key já em uso | IP: ${ip}`
+                }).catch(e => console.error('[SOCKET.IO] Erro ao registrar intrusão:', e.message));
+                
+                return next(new Error("Esta key já está sendo usada por outro cliente"));
+            }
+            
+            console.log(`[SOCKET.IO] ✅ Cliente autenticado via Key (header): ${keyName} | IP: ${ip}`);
+            socket.data.keyName = keyName;
+            socket.data.ip = ip;
+            return next();
+        } else {
+            console.error(`[SOCKET.IO] 🚨 BLOQUEADO! Key inválida (header): ${keyHeader} | IP: ${ip}`);
+        }
+    }
+    
+    // Permite conexão se tiver key válida via query param (script Roblox - método principal)
+    if (keyQuery) {
+        const keyName = findKey(keyQuery);
+        if (keyName && keys[keyName]) {
+            // ✅ VERIFICAÇÃO: Já existe conexão ativa com essa key?
+            if (activeSocketConnections.has(keyName)) {
+                const existingSocketId = activeSocketConnections.get(keyName);
+                console.error(`[SOCKET.IO] 🚨 BLOQUEADO! Key já está em uso: ${keyName} | Socket existente: ${existingSocketId} | IP tentando: ${ip}`);
+                
+                // Registra tentativa suspeita
+                IntruderAttempt.create({
+                    type: 'UNAUTHORIZED_ACTION',
+                    keyName: keyName,
+                    hwid: 'socket-connection',
+                    discordId: keys[keyName].discordId || 'unknown',
+                    ip: ip,
+                    userAgent: socket.handshake.headers['user-agent'] || 'unknown',
+                    details: `Tentativa de conectar Socket.io com key já em uso | IP: ${ip}`
+                }).catch(e => console.error('[SOCKET.IO] Erro ao registrar intrusão:', e.message));
+                
+                return next(new Error("Esta key já está sendo usada por outro cliente"));
+            }
+            
+            console.log(`[SOCKET.IO] ✅ Cliente autenticado via Key (query): ${keyName} | IP: ${ip}`);
+            socket.data.keyName = keyName;
+            socket.data.ip = ip;
+            return next();
+        } else {
+            console.error(`[SOCKET.IO] 🚨 BLOQUEADO! Key inválida (query): ${keyQuery} | IP: ${ip}`);
+        }
+    }
+    
+    // Bloqueia conexão não autenticada
+    console.error(`[SOCKET.IO] 🚨 BLOQUEADO! Conexão sem autenticação | IP: ${ip}`);
+    return next(new Error("Autenticação necessária"));
+});
+
 io.on("connection", (socket) => {
-    console.log("Cliente conectado ao Socket.io");
+    const keyName = socket.data.keyName || 'Web User';
+    const ip = socket.data.ip || 'unknown';
+    const isWebUser = socket.data.isWebUser || false;
+    
+    // ✅ Registra conexão ativa (apenas para keys, não para web users)
+    if (keyName !== 'Web User') {
+        activeSocketConnections.set(keyName, socket.id);
+        console.log(`[SOCKET.IO] Cliente conectado: ${keyName} | IP: ${ip} | Socket ID: ${socket.id}`);
+    } else {
+        console.log(`[SOCKET.IO] Cliente conectado: Web User | IP: ${ip} | Socket ID: ${socket.id}`);
+    }
+    
     socket.emit("brainrots", brainrots);
     socket.emit("presence", Object.values(presence).filter(p => Date.now() - p.lastSeen < ONLINE_STALE_MS));
 
     socket.on("disconnect", () => {
-        console.log("Cliente desconectado do Socket.io");
+        // ✅ Remove conexão ativa
+        if (keyName !== 'Web User' && activeSocketConnections.get(keyName) === socket.id) {
+            activeSocketConnections.delete(keyName);
+            console.log(`[SOCKET.IO] Cliente desconectado: ${keyName} | IP: ${ip}`);
+        } else {
+            console.log(`[SOCKET.IO] Cliente desconectado: Web User | IP: ${ip}`);
+        }
     });
 });

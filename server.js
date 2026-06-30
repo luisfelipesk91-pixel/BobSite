@@ -269,9 +269,6 @@ function sanitizeBodyMiddleware(req, res, next) {
     next();
 }
 
-// Aplica sanitização em TODAS as rotas
-app.use(sanitizeBodyMiddleware);
-
 const RechargeSchema = new mongoose.Schema({
     discordId:  { type: String, required: true },
     discordTag: String,
@@ -1095,6 +1092,9 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+
+// ✅ Aplica sanitização em TODAS as rotas (proteção XSS global)
+app.use(sanitizeBodyMiddleware);
 
 app.get("/", (req, res) => {
     res.json({ 

@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 const express  = require("express");
 const http     = require("http");
@@ -34,245 +33,10 @@ const COLORS = {
 
 const BLOCKED_UA = ["python-requests","python-httpx","curl","wget","httpie","insomnia","postman","go-http-client","java/","axios","okhttp","libwww-perl","scrapy","aiohttp"];
 
-// 🔒 PROTEÇÃO MÁXIMA - Rate Limiting Avançado
-const ADVANCED_RATE_LIMITS = {
-    perIP: { max: 30, window: 60000 },           // 30 req/min por IP
-    perKey: { max: 50, window: 60000 },          // 50 req/min por Key
-    perHWID: { max: 50, window: 60000 },         // 50 req/min por HWID
-    webhook: { max: 5, window: 300000 },         // 5 req/5min para webhooks
-    auth: { max: 10, window: 60000 },            // 10 tentativas de auth/min
-    presence: { max: 100, window: 60000 },       // 100 presence updates/min
-};
-
-const rateLimitStore = {
-    ip: new Map(),
-    key: new Map(),
-    hwid: new Map(),
-    endpoint: new Map()
-};
-
-// 🔒 HONEYPOT - Endpoints falsos para detectar scanners
-const HONEYPOT_ENDPOINTS = [
-    '/admin', '/api/admin', '/phpmyadmin', '/wp-admin', 
-    '/api/users', '/api/keys/all', '/.env', '/config.json',
-    '/api/webhook', '/api/webhooks/list', '/admin/login'
-];
-
-// 🔒 FINGERPRINTING - Detecta bots e ferramentas de hacking
-const SUSPICIOUS_PATTERNS = {
-    userAgents: ['bot', 'crawler', 'spider', 'scraper', 'hack', 'exploit', 'scan'],
-    headers: ['x-requested-with', 'x-scanner', 'x-exploit'],
-    paths: ['/admin', '/.git', '/.env', '/wp-', '/phpmyadmin']
-};
-
-// 🔒 IP BLACKLIST AUTOMÁTICO
-const autoBlacklistedIPs = new Map(); // IP -> { reason, timestamp, attempts }
-
-// 🔒 PROTEÇÃO CONTRA FINGERPRINTING
-const REQUEST_SIGNATURES = new Map(); // Armazena assinaturas de requisições para detectar padrões
-
 function requireEnv(name) {
     const val = process.env[name];
     if (!val) { console.error(`[AVISO] Variável não definida: ${name}. O bot continuará rodando, mas algumas funções podem falhar.`); return null; }
     return val;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 🔒 SISTEMA DE PROTEÇÃO MÁXIMA - ANTI-SPY / ANTI-HACK / ANTI-LEAK
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * 🔒 Rate Limiting Avançado - Por IP, Key, HWID e Endpoint
- */
-function advancedRateLimit(identifier, limitConfig) {
-    const now = Date.now();
-    const store = rateLimitStore.endpoint;
-    
-    if (!store.has(identifier)) {
-        store.set(identifier, { count: 1, resetAt: now + limitConfig.window });
-        return false; // Não bloqueado
-    }
-    
-    const record = store.get(identifier);
-    
-    // Reset se a janela expirou
-    if (now > record.resetAt) {
-        store.set(identifier, { count: 1, resetAt: now + limitConfig.window });
-        return false;
-    }
-    
-    record.count++;
-    
-    // Bloqueado se excedeu o limite
-    if (record.count > limitConfig.max) {
-        return true; // BLOQUEADO
-    }
-    
-    return false;
-}
-
-/**
- * 🔒 Detecta Request Suspeita - Bot, Scanner, Exploit Tool
- */
-function isSuspiciousRequest(req) {
-    const ua = (req.headers['user-agent'] || '').toLowerCase();
-    const ip = req.ip;
-    const path = req.path.toLowerCase();
-    
-    // 1. User-Agent suspeito
-    for (const pattern of SUSPICIOUS_PATTERNS.userAgents) {
-        if (ua.includes(pattern)) {
-            return { suspicious: true, reason: `Suspicious UA: ${pattern}` };
-        }
-    }
-    
-    // 2. Headers de scanning/exploit
-    for (const header of SUSPICIOUS_PATTERNS.headers) {
-        if (req.headers[header]) {
-            return { suspicious: true, reason: `Suspicious header: ${header}` };
-        }
-    }
-    
-    // 3. Path de scanning comum
-    for (const pattern of SUSPICIOUS_PATTERNS.paths) {
-        if (path.includes(pattern)) {
-            return { suspicious: true, reason: `Scanning path: ${pattern}` };
-        }
-    }
-    
-    // 4. Sem User-Agent (muito suspeito)
-    if (!req.headers['user-agent']) {
-        return { suspicious: true, reason: 'No User-Agent' };
-    }
-    
-    // 5. Headers HTTP/1.0 (outdated, usado por scanners)
-    if (req.httpVersion === '1.0') {
-        return { suspicious: true, reason: 'HTTP/1.0 (scanner signature)' };
-    }
-    
-    return { suspicious: false };
-}
-
-/**
- * 🔒 Auto-Blacklist IP - Bloqueia automaticamente IPs maliciosos
- */
-function autoBlacklistIP(ip, reason) {
-    const existing = autoBlacklistedIPs.get(ip);
-    
-    if (existing) {
-        existing.attempts++;
-        existing.lastAttempt = Date.now();
-    } else {
-        autoBlacklistedIPs.set(ip, {
-            reason,
-            timestamp: Date.now(),
-            lastAttempt: Date.now(),
-            attempts: 1,
-            permanent: false
-        });
-    }
-    
-    // Após 5 tentativas suspeitas, bloqueia permanentemente
-    const record = autoBlacklistedIPs.get(ip);
-    if (record.attempts >= 5) {
-        record.permanent = true;
-        console.error(`[SECURITY] 🚨 IP PERMANENTEMENTE BLACKLISTED: ${ip} | Motivo: ${reason} | Tentativas: ${record.attempts}`);
-    } else {
-        console.warn(`[SECURITY] ⚠️ IP Temporariamente Blacklisted: ${ip} | Motivo: ${reason} | Tentativas: ${record.attempts}/5`);
-    }
-}
-
-/**
- * 🔒 Verifica se IP está Blacklisted
- */
-function isIPBlacklisted(ip) {
-    const record = autoBlacklistedIPs.get(ip);
-    if (!record) return false;
-    
-    // Permanente
-    if (record.permanent) return true;
-    
-    // Temporário (24 horas)
-    const elapsed = Date.now() - record.timestamp;
-    if (elapsed > 24 * 60 * 60 * 1000) {
-        autoBlacklistedIPs.delete(ip);
-        return false;
-    }
-    
-    return true;
-}
-
-/**
- * 🔒 Obfusca Dados Sensíveis - Anti-Spy
- */
-function obfuscateSensitiveData(data) {
-    if (!data || typeof data !== 'object') return data;
-    
-    const obfuscated = { ...data };
-    
-    // Remove campos ultra-sensíveis completamente
-    const removeFields = ['password', 'secret', 'token', 'webhook', 'ip', 'hwid_full'];
-    removeFields.forEach(field => delete obfuscated[field]);
-    
-    // Ofusca parcialmente
-    if (obfuscated.discordId) {
-        obfuscated.discordId = obfuscated.discordId.substring(0, 4) + '****';
-    }
-    if (obfuscated.key) {
-        obfuscated.key = obfuscated.key.substring(0, 6) + '****';
-    }
-    if (obfuscated.hwid) {
-        obfuscated.hwid = obfuscated.hwid.substring(0, 8) + '****';
-    }
-    
-    return obfuscated;
-}
-
-/**
- * 🔒 Fingerprint de Request - Detecta padrões de ataque
- */
-function generateRequestFingerprint(req) {
-    const components = [
-        req.ip,
-        req.headers['user-agent'] || '',
-        req.headers['accept'] || '',
-        req.headers['accept-language'] || '',
-        req.headers['accept-encoding'] || '',
-        req.method,
-        req.path
-    ];
-    
-    return crypto.createHash('sha256').update(components.join('|')).digest('hex');
-}
-
-/**
- * 🔒 Detecta Request Pattern Abuse
- */
-function detectPatternAbuse(fingerprint) {
-    const now = Date.now();
-    const window = 60000; // 1 minuto
-    
-    if (!REQUEST_SIGNATURES.has(fingerprint)) {
-        REQUEST_SIGNATURES.set(fingerprint, { count: 1, firstSeen: now, lastSeen: now });
-        return false;
-    }
-    
-    const record = REQUEST_SIGNATURES.get(fingerprint);
-    record.count++;
-    record.lastSeen = now;
-    
-    // Limpa signatures antigas (>5 minutos)
-    if (now - record.firstSeen > 300000) {
-        REQUEST_SIGNATURES.delete(fingerprint);
-        return false;
-    }
-    
-    // Se mais de 100 requests idênticas em 1 minuto = bot/scanner
-    if (record.count > 100) {
-        return true;
-    }
-    
-    return false;
 }
 
 const ADMIN_PASS    = requireEnv("ADMIN_PASS");
@@ -324,8 +88,7 @@ if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET) {
 // console.log("[CONFIG] DISCORD_CLIENT_ID:", DISCORD_CLIENT_ID ? "✓ Configurado" : "✗ FALTANDO");
 
 const ADMIN_ROLE_IDS = process.env.ADMIN_ROLE_IDS ? process.env.ADMIN_ROLE_IDS.split(",") : ["1477885793144930496","1501356382677373101","1477885797553148066"];
-// ✅ LISTA FIXA DE ADMINS - APENAS ESSES 2 USUÁRIOS
-const ADMIN_DISCORD_IDS = ["810259070211719268", "1512847451483275531"];
+const ADMIN_DISCORD_IDS = process.env.ADMIN_DISCORD_IDS ? process.env.ADMIN_DISCORD_IDS.split(",") : ["810259070211719268","1512847451483275531"];
 const RECHARGE_CHANNEL = process.env.RECHARGE_CHANNEL || "1511517095412895905";
 const MIN_RECHARGE = parseInt(process.env.MIN_RECHARGE || "5");
 
@@ -423,88 +186,6 @@ const TransactionSchema = new mongoose.Schema({
     description: String, createdAt: { type: Date, default: Date.now },
 });
 const Transaction = mongoose.model("Transaction", TransactionSchema);
-
-// ✅ AUDITLOG: Registra todas as ações administrativas
-const AuditLogSchema = new mongoose.Schema({
-    adminId: String,
-    adminTag: String,
-    action: String,        // ex: "CREATE_KEY", "BLACKLIST_USER", "PAUSE_ALL"
-    targetDiscordId: String,
-    targetKey: String,
-    details: Object,       // Dados adicionais da ação
-    ip: String,
-    timestamp: { type: Date, default: Date.now }
-});
-const AuditLog = mongoose.model("AuditLog", AuditLogSchema);
-
-// ✅ BLACKLISTED HWIDs: Lista global de HWIDs banidos (mesmo sem key)
-const BlacklistedHWIDSchema = new mongoose.Schema({
-    hwid: { type: String, required: true, unique: true },
-    reason: String,
-    bannedBy: String,      // Discord ID do admin
-    bannedByTag: String,   // Tag do admin
-    originalDiscordId: String,  // Discord ID do usuário original
-    bannedAt: { type: Date, default: Date.now }
-});
-const BlacklistedHWID = mongoose.model("BlacklistedHWID", BlacklistedHWIDSchema);
-
-// ✅ INTRUDER ATTEMPTS: Registra tentativas suspeitas de acesso
-const IntruderAttemptSchema = new mongoose.Schema({
-    keyName: String,
-    hwid: String,
-    attemptType: String,  // "HWID_MISMATCH", "BLACKLISTED_HWID", "BLACKLISTED_KEY", "INVALID_KEY"
-    keyDiscordId: String,
-    ip: String,
-    userAgent: String,
-    blocked: { type: Boolean, default: true },
-    timestamp: { type: Date, default: Date.now }
-});
-const IntruderAttempt = mongoose.model("IntruderAttempt", IntruderAttemptSchema);
-
-// ✅ Função helper para registrar ações administrativas
-async function logAdminAction(adminId, adminTag, action, details = {}, ip = null) {
-    try {
-        await AuditLog.create({
-            adminId,
-            adminTag,
-            action,
-            targetDiscordId: details.discordId || null,
-            targetKey: details.keyName || null,
-            details,
-            ip,
-            timestamp: new Date()
-        });
-        console.log(`[AUDIT] ${adminTag} executou ${action}:`, details);
-    } catch (e) {
-        console.error("[AUDIT] Erro ao registrar log:", e.message);
-    }
-}
-
-// ✅ SANITIZAÇÃO GLOBAL: Protege contra XSS em TODOS os inputs
-function sanitizeInput(input) {
-    if (!input) return '';
-    if (typeof input !== 'string') return String(input);
-    
-    // Remove caracteres perigosos e limita tamanho
-    return input
-        .replace(/[<>'"&`]/g, '')  // Remove HTML/JS perigoso
-        .replace(/javascript:/gi, '')  // Remove javascript: protocol
-        .replace(/on\w+\s*=/gi, '')  // Remove event handlers (onclick=, onerror=, etc)
-        .substring(0, 200)  // Limita tamanho
-        .trim();
-}
-
-// ✅ Middleware: Sanitiza TODOS os inputs de req.body automaticamente
-function sanitizeBodyMiddleware(req, res, next) {
-    if (req.body && typeof req.body === 'object') {
-        for (const key in req.body) {
-            if (typeof req.body[key] === 'string') {
-                req.body[key] = sanitizeInput(req.body[key]);
-            }
-        }
-    }
-    next();
-}
 
 const RechargeSchema = new mongoose.Schema({
     discordId:  { type: String, required: true },
@@ -766,35 +447,17 @@ async function createAutoKeyForUser(discordId, discordTag) {
     return keyName;
 }
 
-async function opCreateKey(name, durationMs, adminId = null) {
-    // 🔒 PROTEÇÃO: Apenas admins autorizados podem criar keys
-    if (!adminId || !ADMIN_DISCORD_IDS.includes(String(adminId))) {
-        console.error(`[SECURITY] 🚨 TENTATIVA NÃO-AUTORIZADA DE CRIAR KEY! User: ${adminId} | Key: ${name}`);
-        return { ok: false, msg: `❌ ACESSO NEGADO: Apenas admins autorizados podem criar keys!` };
-    }
-    
+async function opCreateKey(name, durationMs) {
     if (keys[name]) return { ok: false, msg: `❌ Key \`${name}\` já existe!` };
     keys[name] = { expiry: Date.now() + durationMs, paused: false, remaining: 0, hwid: null, discordId: null, warnSent: false, isAutoKey: false };
     await saveKey(name);
-    
-    // ✅ LOG de criação autorizada
-    console.log(`[ADMIN] ✅ Key criada: ${name} | Duração: ${formatTime(durationMs)} | Admin: ${adminId}`);
-    
     return { ok: true, msg: `✅ Key \`${name}\` criada com sucesso por ${formatTime(durationMs)}!` };
 }
 
-async function opCreateLifetime(name, adminId = null, adminTag = null) {
+async function opCreateLifetime(name) {
     if (keys[name]) return { ok: false, msg: `❌ Key \`${name}\` já existe!` };
-    
-    // ✅ AUDITORIA: Registra criação de key infinita
-    if (adminId && adminTag) {
-        await logAdminAction(adminId, adminTag, "CREATE_LIFETIME_KEY", { keyName: name });
-    }
-    
     keys[name] = { expiry: Infinity, paused: false, remaining: Infinity, hwid: null, discordId: null, warnSent: false, isAutoKey: false };
     await saveKey(name);
-    
-    console.log(`[SECURITY] ⚠️ Key LIFETIME criada: ${name} por ${adminTag || 'SYSTEM'}`);
     return { ok: true, msg: `✅ Key \`${name}\` Lifetime criada com sucesso!` };
 }
 
@@ -1302,30 +965,12 @@ async function requireAdminAuth(req, res, next) {
         }
     }
 
-    // ✅ LISTA FIXA DE ADMINS - NÃO USA VARIÁVEL DE AMBIENTE
-    const AUTHORIZED_ADMINS = ["810259070211719268", "1512847451483275531"];
-    
-    // Admin liberado APENAS por ID direto da lista fixa
-    const hasAdminId = !!req.user && AUTHORIZED_ADMINS.includes(String(req.user.discordId));
+    // Admin liberado por ID direto (ADMIN_DISCORD_IDS) ou por cargo (ADMIN_ROLE_IDS)
+    const hasAdminId = !!req.user && ADMIN_DISCORD_IDS.includes(String(req.user.discordId));
+    const hasAdminRole = !!req.user && ADMIN_ROLE_IDS.some(id => req.user.roles?.includes(id));
 
-    if (hasAdminId) {
-        console.log(`[SECURITY] ✅ Admin autorizado: ${req.user.discordId}`);
-        return next(); // Acesso liberado
-    }
-
-    // ✅ SEGURANÇA: Registra tentativa não autorizada
-    if (req.user && req.user.discordId) {
-        console.error(`[SECURITY] 🚨 Acesso admin NEGADO: ${req.user.discordId} | IP: ${req.ip}`);
-        
-        IntruderAttempt.create({
-            type: 'UNAUTHORIZED_ACTION',
-            keyName: 'N/A',
-            hwid: 'web-access',
-            discordId: String(req.user.discordId),
-            ip: req.ip,
-            userAgent: req.headers['user-agent'] || 'unknown',
-            details: `Tentativa de acesso admin sem permissão | User: ${req.user.discordTag || req.user.discordId}`
-        }).catch(e => console.error('[SECURITY] Erro ao registrar intrusão:', e.message));
+    if (hasAdminId || hasAdminRole) {
+        return next(); // Acesso liberado por ID ou por cargo de admin
     }
 
     // Fallback: secret de admin para chamadas de API internas/scripts
@@ -1342,81 +987,12 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 🔒 MIDDLEWARE DE PROTEÇÃO MÁXIMA - PRIMEIRA LINHA DE DEFESA
-// ═══════════════════════════════════════════════════════════════════════════
-
-app.use((req, res, next) => {
-    const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-    
-    // 🔒 1. VERIFICA IP BLACKLIST
-    if (isIPBlacklisted(ip)) {
-        console.error(`[SECURITY] 🚨 BLACKLISTED IP BLOCKED: ${ip} | Path: ${req.path}`);
-        return res.status(403).json({ error: "Access Denied" });
-    }
-    
-    // 🔒 2. DETECTA REQUEST SUSPEITA
-    const suspicionCheck = isSuspiciousRequest(req);
-    if (suspicionCheck.suspicious) {
-        console.error(`[SECURITY] 🚨 SUSPICIOUS REQUEST BLOCKED: ${ip} | Reason: ${suspicionCheck.reason} | Path: ${req.path}`);
-        autoBlacklistIP(ip, suspicionCheck.reason);
-        return res.status(403).json({ error: "Forbidden" });
-    }
-    
-    // 🔒 3. HONEYPOT - Detecta scanners automaticamente
-    if (HONEYPOT_ENDPOINTS.includes(req.path)) {
-        console.error(`[SECURITY] 🍯 HONEYPOT TRIGGERED: ${ip} | Path: ${req.path} | UA: ${req.headers['user-agent']}`);
-        autoBlacklistIP(ip, `Honeypot: ${req.path}`);
-        
-        // Retorna resposta fake para confundir o scanner
-        return res.status(404).json({ error: "Not Found" });
-    }
-    
-    // 🔒 4. FINGERPRINT & PATTERN DETECTION
-    const fingerprint = generateRequestFingerprint(req);
-    if (detectPatternAbuse(fingerprint)) {
-        console.error(`[SECURITY] 🚨 PATTERN ABUSE DETECTED: ${ip} | Fingerprint: ${fingerprint.substring(0, 16)}...`);
-        autoBlacklistIP(ip, 'Pattern Abuse (Bot/Scanner)');
-        return res.status(429).json({ error: "Too Many Requests" });
-    }
-    
-    // 🔒 5. RATE LIMITING GLOBAL POR IP
-    const ipRateLimited = advancedRateLimit(`ip:${ip}`, ADVANCED_RATE_LIMITS.perIP);
-    if (ipRateLimited) {
-        console.warn(`[SECURITY] ⚠️ RATE LIMIT EXCEEDED: ${ip} | Path: ${req.path}`);
-        autoBlacklistIP(ip, 'Rate Limit Exceeded');
-        return res.status(429).json({ error: "Too Many Requests", retryAfter: 60 });
-    }
-    
-    // ✅ Request aprovada - continua
-    next();
-});
-
 // CORS para permitir requisições do Vercel
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", FRONTEND_URL);
     res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-admin-secret, x-client, x-script-secret, x-railway-secret, x-hwid");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-admin-secret, x-client, x-script-secret, x-railway-secret");
     res.header("Access-Control-Allow-Credentials", "true");
-    
-    // ✅ SEGURANÇA MÁXIMA: Headers de Proteção
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    
-    // ✅ CSP: Content Security Policy
-    res.setHeader('Content-Security-Policy', 
-        "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.socket.io; " +
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-        "font-src 'self' https://fonts.gstatic.com; " +
-        "img-src 'self' data: https: blob:; " +
-        "connect-src 'self' wss: https: ws: " + FRONTEND_URL + "; " +
-        "frame-ancestors 'none';"
-    );
     
     // Handle preflight
     if (req.method === "OPTIONS") {
@@ -1426,9 +1002,6 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
-
-// ✅ Aplica sanitização em TODAS as rotas (proteção XSS global)
-app.use(sanitizeBodyMiddleware);
 
 app.get("/", (req, res) => {
     res.json({ 
@@ -1518,66 +1091,12 @@ app.post("/api/auth", requireClientHeader, async (req, res) => {
     const { key, hwid } = req.body;
     const keyName = findKey(key);
 
-    // ✅ INTRUDER DETECTION: Key inválida
     if (!keyName) {
-        console.warn(`[SECURITY] 🚨 Tentativa com key INVÁLIDA: ${key} | HWID: ${hwid?.substring(0, 16)}...`);
-        
-        await IntruderAttempt.create({
-            keyName: key,
-            hwid: hwid || 'unknown',
-            attemptType: 'INVALID_KEY',
-            ip: req.ip,
-            userAgent: req.headers['user-agent'],
-            blocked: true
-        });
-        
+        console.warn(`[AUTH] Tentativa de login com key inexistente: ${key}`);
         return res.status(401).json({ error: "Key inválida ou expirada." });
     }
 
-    // ✅ VERIFICAÇÃO 1: HWID está globalmente blacklisted?
-    const hwidBanned = await BlacklistedHWID.findOne({ hwid });
-    if (hwidBanned) {
-        console.error(`[SECURITY] 🚨 HWID BLACKLISTED tentou login! Key: ${keyName} | HWID: ${hwid?.substring(0, 16)}... | Motivo: ${hwidBanned.reason}`);
-        
-        await IntruderAttempt.create({
-            keyName,
-            hwid,
-            attemptType: 'BLACKLISTED_HWID',
-            keyDiscordId: keys[keyName]?.discordId,
-            ip: req.ip,
-            userAgent: req.headers['user-agent'],
-            blocked: true
-        });
-        
-        return res.status(403).json({ 
-            error: "Seu dispositivo foi banido permanentemente do sistema.",
-            reason: hwidBanned.reason,
-            bannedAt: hwidBanned.bannedAt
-        });
-    }
-
     const data = keys[keyName];
-    
-    // ✅ VERIFICAÇÃO 2: Key está blacklisted?
-    if (data.blacklisted) {
-        console.error(`[SECURITY] 🚨 Key BLACKLISTED usada! Key: ${keyName} | HWID: ${hwid?.substring(0, 16)}... | Motivo: ${data.blacklistReason}`);
-        
-        await IntruderAttempt.create({
-            keyName,
-            hwid,
-            attemptType: 'BLACKLISTED_KEY',
-            keyDiscordId: data.discordId,
-            ip: req.ip,
-            userAgent: req.headers['user-agent'],
-            blocked: true
-        });
-        
-        return res.status(403).json({ 
-            error: "Esta key foi banida do sistema.",
-            reason: data.blacklistReason,
-            bannedAt: data.blacklistedAt
-        });
-    }
     const now = Date.now();
 
     // 🚨 VERIFICAÇÃO DE BLACKLIST (PRIORIDADE MÁXIMA)
@@ -1604,35 +1123,10 @@ app.post("/api/auth", requireClientHeader, async (req, res) => {
 
     if (data.hwid && data.hwid !== hwid) {
         if (kicked[keyName.toLowerCase()] && (now - kicked[keyName.toLowerCase()] < BLOCK_DURATION)) {
-            console.warn(`[SECURITY] 🚨 Tentativa REPETIDA com HWID diferente! Key: ${keyName} | HWID correto: ${data.hwid.substring(0,16)}... | HWID intruso: ${hwid?.substring(0,16)}...`);
-            
-            // Registra tentativa de intrusão
-            await IntruderAttempt.create({
-                keyName,
-                hwid,
-                attemptType: 'HWID_MISMATCH',
-                keyDiscordId: data.discordId,
-                ip: req.ip,
-                userAgent: req.headers['user-agent'],
-                blocked: true
-            });
-            
+            console.warn(`[AUTH] Tentativa de login com HWID diferente (bloqueado): ${keyName}, HWID: ${hwid}`);
             return res.status(401).json({ error: "HWID diferente. Tente novamente em alguns minutos." });
         }
-        
-        console.warn(`[SECURITY] 🚨 INTRUSO DETECTADO! Alguém tentou usar a key: ${keyName} | Owner HWID: ${data.hwid.substring(0,16)}... | Intruso HWID: ${hwid?.substring(0,16)}... | Discord: ${data.discordId}`);
-        
-        // Registra tentativa de intrusão
-        await IntruderAttempt.create({
-            keyName,
-            hwid,
-            attemptType: 'HWID_MISMATCH',
-            keyDiscordId: data.discordId,
-            ip: req.ip,
-            userAgent: req.headers['user-agent'],
-            blocked: true
-        });
-        
+        console.warn(`[AUTH] Tentativa de login com HWID diferente: ${keyName}, HWID antigo: ${data.hwid}, HWID novo: ${hwid}`);
         kicked[keyName.toLowerCase()] = now;
         return res.status(401).json({ error: "HWID diferente. Se o erro persistir, resete seu HWID no painel." });
     }
@@ -1650,48 +1144,15 @@ app.post("/api/auth", requireClientHeader, async (req, res) => {
         console.log(`[AUTH] Key auto-gerada ${keyName} associada ao Discord ID ${req.user.discordId}`);
     }
 
-    // ✅ LOG COMPLETO DE AUTENTICAÇÃO BEM-SUCEDIDA
     const timeLeft = data.expiry === Infinity ? Infinity : data.expiry - now;
-    console.log(`[AUTH] ✅ LOGIN VÁLIDO | Key: ${keyName} | HWID: ${hwid} | IP: ${req.ip} | Discord: ${data.discordId || 'N/A'} | Tempo: ${timeLeft === Infinity ? 'LIFETIME' : formatTime(timeLeft)}`);
-    
     res.json({ ok: true, timeLeft, isLifetime: data.expiry === Infinity });
 });
 
 app.post("/api/presence", requireClientHeader, async (req, res) => {
+    console.log("[PRESENCE DEBUG] Requisição recebida:", JSON.stringify(req.body));
     const { key, name, displayName, userId, jobId } = req.body;
-    const hwid = req.headers['x-hwid'] || 'unknown';
-    const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-    
-    // 🔒 RATE LIMIT ESPECÍFICO para presence
-    const presenceRateLimited = advancedRateLimit(`presence:${ip}`, ADVANCED_RATE_LIMITS.presence);
-    if (presenceRateLimited) {
-        console.warn(`[SECURITY] ⚠️ PRESENCE RATE LIMIT: ${ip} | Key: ${key}`);
-        return res.status(429).json({ error: "Too Many Requests" });
-    }
-    
     const keyName = findKey(key);
-    
-    // 🚨 INTRUSÃO: Key inválida
-    if (!keyName) {
-        console.error(`[SECURITY] 🚨 PRESENCE com KEY INVÁLIDA! Key: "${key?.substring(0, 6)}****" | HWID: ${hwid?.substring(0, 16)}... | IP: ${ip} | Name: ${name}`);
-        
-        autoBlacklistIP(ip, `Invalid Key in Presence: ${key?.substring(0, 6)}****`);
-        
-        await IntruderAttempt.create({
-            type: 'INVALID_KEY',
-            keyName: key,
-            hwid: hwid || 'unknown',
-            discordId: 'unknown',
-            ip: ip,
-            userAgent: req.headers['user-agent'] || 'unknown',
-            details: `Tentativa /api/presence com key inválida "${key?.substring(0, 6)}****" | Name: ${name} | JobID: ${jobId?.substring(0, 8)}...`
-        });
-        
-        return res.status(401).json({ error: "Key inválida." });
-    }
-
-    // ✅ LOG DETALHADO de tentativas VÁLIDAS (com HWID completo e IP) - SEM JOBID COMPLETO
-    console.log(`[PRESENCE] ✅ Key: ${keyName} | HWID: ${hwid} | IP: ${ip} | JobID: ${jobId?.substring(0, 8)}... | User: ${userId?.substring(0, 6)}... | Name: ${name}`);
+    if (!keyName) return res.status(401).json({ error: "Key inválida." });
 
     // ✅ SEMPRE usar lowercase para consistência + salva displayName e userId
     const keyLower = keyName.toLowerCase();
@@ -1699,110 +1160,23 @@ app.post("/api/presence", requireClientHeader, async (req, res) => {
         name, 
         displayName: displayName || name,
         userId: userId || null,
-        jobId, // JobID armazenado internamente (não exposto)
+        jobId, 
         lastSeen: Date.now(), 
         key: keyName 
     };
-    
-    // 🔒 ANTI-SPY: Socket.io NÃO envia JobID completo
-    io.emit("presence", { 
-        key: keyName, 
-        name, 
-        displayName, 
-        userId: userId?.substring(0, 8) + '****', // Ofuscado
-        jobId: '********', // COMPLETAMENTE OCULTO
-        lastSeen: Date.now() 
-    });
+    io.emit("presence", { key: keyName, name, displayName, userId, jobId, lastSeen: Date.now() });
     
     res.status(200).send("OK");
 });
 
-// 🔒 ENDPOINT PROTEGIDO DE WEBHOOKS - Só para Serverhop autenticado
-app.post("/api/webhooks/get", async (req, res) => {
-    const { secret } = req.body;
-    const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-    
-    // 🔒 RATE LIMIT ESPECÍFICO para webhooks (máximo 5 requests a cada 5 minutos)
-    const webhookRateLimited = advancedRateLimit(`webhook:${ip}`, ADVANCED_RATE_LIMITS.webhook);
-    if (webhookRateLimited) {
-        console.error(`[SECURITY] 🚨 WEBHOOK RATE LIMIT EXCEEDED: ${ip}`);
-        autoBlacklistIP(ip, 'Webhook Rate Limit Abuse');
-        
-        await IntruderAttempt.create({
-            type: 'WEBHOOK_RATE_LIMIT',
-            keyName: 'N/A',
-            hwid: 'N/A',
-            discordId: 'unknown',
-            ip: ip,
-            userAgent: req.headers['user-agent'] || 'unknown',
-            details: `Excedeu rate limit de webhooks (5 req/5min)`
-        });
-        
-        return res.status(429).json({ error: "Too Many Requests", retryAfter: 300 });
-    }
-    
-    // Verifica se o secret do Serverhop é válido
-    if (secret !== RAILWAY_SECRET) {
-        console.error(`[SECURITY] 🚨 Tentativa de acessar webhooks com secret INVÁLIDO! IP: ${ip} | Secret: ${secret?.substring(0, 4)}****`);
-        
-        autoBlacklistIP(ip, 'Invalid Webhook Secret');
-        
-        await IntruderAttempt.create({
-            type: 'INVALID_WEBHOOK_SECRET',
-            keyName: 'N/A',
-            hwid: 'N/A',
-            discordId: 'unknown',
-            ip: ip,
-            userAgent: req.headers['user-agent'] || 'unknown',
-            details: `Tentativa de acesso às webhooks com secret inválido: ${secret?.substring(0, 4)}****`
-        });
-        
-        return res.status(403).json({ error: "Acesso negado" });
-    }
-    
-    // Retorna as webhooks protegidas das variáveis de ambiente
-    const webhooks = {
-        normal: process.env.WEBHOOK_URL || "",
-        mid: process.env.WEBHOOK_MID || "",
-        high: process.env.WEBHOOK_HIGH || "",
-        ultra: process.env.WEBHOOK_ULTRA || ""
-    };
-    
-    // ✅ Cifra as webhooks para transmissão segura
-    const encrypted = {
-        normal: xorEncrypt(webhooks.normal),
-        mid: xorEncrypt(webhooks.mid),
-        high: xorEncrypt(webhooks.high),
-        ultra: xorEncrypt(webhooks.ultra)
-    };
-    
-    console.log(`[WEBHOOKS] ✅ Webhooks enviadas para IP: ${ip} | UA: ${req.headers['user-agent']?.substring(0, 50)}`);
-    
-    res.json({ 
-        ok: true, 
-        webhooks: encrypted,
-        encrypted: true 
-    });
-});
-
 app.post("/api/brainrot", requireClientHeader, async (req, res) => {
-    const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-    
     console.log("[BRAINROT DEBUG] Requisição recebida:", JSON.stringify(req.body));
     const { brainrot, name, jobId, value, owner, players, maxPlayers, placeId, inDuel } = req.body;
-    
-    // 🔒 RATE LIMIT para brainrot submissions
-    const brainrotRateLimited = advancedRateLimit(`brainrot:${ip}`, { max: 200, window: 60000 });
-    if (brainrotRateLimited) {
-        console.warn(`[SECURITY] ⚠️ BRAINROT RATE LIMIT: ${ip}`);
-        return res.status(429).json({ error: "Too Many Requests" });
-    }
-    
     pushBrainrot({ 
         id: Date.now().toString(), 
         brainrot, 
         name, 
-        jobId, // Armazenado internamente
+        jobId, 
         value, 
         owner,
         players: players || "?",
@@ -1814,35 +1188,10 @@ app.post("/api/brainrot", requireClientHeader, async (req, res) => {
 });
 
 app.get("/api/latest", requireClientHeader, (req, res) => {
-    const requestKey = req.query.key || req.headers['x-key'];
-    const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-    
-    console.log("[LATEST DEBUG] Requisição de Key:", requestKey?.substring(0, 6) + '****', "| IP:", ip);
-    
-    // 🔒 RATE LIMIT para /api/latest
-    const latestRateLimited = advancedRateLimit(`latest:${ip}`, { max: 120, window: 60000 });
-    if (latestRateLimited) {
-        console.warn(`[SECURITY] ⚠️ LATEST RATE LIMIT: ${ip}`);
-        return res.status(429).json({ error: "Too Many Requests" });
-    }
-    
+    console.log("[LATEST DEBUG] Requisição de:", req.query.key);
     const latest = brainrots.length > 0 ? brainrots[brainrots.length - 1] : null;
-    
     if (latest) {
-        // 🔒 ANTI-SPY: Remove JobID completamente da resposta
-        const safeLatest = {
-            id: latest.id,
-            brainrot: latest.brainrot,
-            name: latest.name,
-            // jobId: '********', // OCULTO COMPLETAMENTE
-            value: latest.value,
-            owner: latest.owner?.substring(0, 4) + '****', // Ofuscado
-            players: latest.players,
-            maxPlayers: latest.maxPlayers,
-            placeId: latest.placeId,
-            inDuel: latest.inDuel
-        };
-        res.json(safeLatest);
+        res.json(latest);
     } else {
         res.json({ id: null });
     }
@@ -1977,10 +1326,6 @@ app.get("/api/online", async (req, res) => {
             const jobId = presenceData ? presenceData.jobId : null;
             const isOnline = presenceData && (now - presenceData.lastSeen < ONLINE_STALE_MS);
             
-            // ✅ OFUSCA jobId e userId para segurança (evita spy)
-            const safeJobId = jobId ? (jobId.substring(0, 8) + "..." + jobId.substring(jobId.length - 4)) : null;
-            const safeUserId = userId ? (userId.substring(0, 3) + "..." + userId.substring(userId.length - 3)) : null;
-            
             activeKeys.push({
                 keyPrefix: keyName.substring(0, 7) + "***", // Mascarado no site
                 discordUsername: username,
@@ -1988,9 +1333,9 @@ app.get("/api/online", async (req, res) => {
                 discordId: keyData.discordId,
                 robloxName: robloxName, // Name (username do Roblox)
                 displayName: displayName, // DisplayName (nome de exibição)
-                userId: safeUserId, // ✅ OFUSCADO: UserId parcialmente oculto
+                userId: userId, // UserId do Roblox
                 name: robloxName || username, // Fallback para Discord username
-                jobId: safeJobId, // ✅ OFUSCADO: JobId parcialmente oculto
+                jobId: jobId,
                 isOnline: isOnline, // ✅ ADICIONADO: Se está realmente online
                 expiryMs: keyData.expiry === Infinity ? null : keyData.expiry - now,
                 isLifetime: keyData.expiry === Infinity,
@@ -3150,23 +2495,7 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
             return; 
         }
         
-        if (id === "logs_listkeys") {
-            // 🔒 PROTEÇÃO: Apenas admins podem listar TODAS as keys
-            if (!await isAdmin(interaction.member)) {
-                console.error(`[SECURITY] 🚨 Usuário NÃO-ADMIN tentou listar todas as keys! User: ${interaction.user.tag} (${interaction.user.id})`);
-                
-                await IntruderAttempt.create({
-                    type: 'UNAUTHORIZED_ACTION',
-                    keyName: 'N/A',
-                    hwid: 'discord-action',
-                    discordId: interaction.user.id,
-                    details: `Tentativa de listar todas as keys sem permissão | User: ${interaction.user.tag}`
-                });
-                
-                await interaction.reply({ content: "❌ Você não tem permissão para listar todas as keys!", flags: 64 }).catch(() => {});
-                return;
-            }
-            
+        if (id === "logs_listkeys") { 
             await interaction.deferReply({ flags: 64 }).catch(() => {}); 
             
             // Filtra keys que não sejam auto-keys expiradas (expiry=0 e paused=true)
@@ -3398,31 +2727,6 @@ clientLogs.on(Events.InteractionCreate, async (interaction) => {
     // ═══ FIM DOS NOVOS BOTÕES ═══
     if (id.startsWith("pay_confirm_")) { await interaction.deferReply({ flags: 64 }).catch(() => {}); const parts = id.split("_"), targetId = parts[2], hours = parseInt(parts[3]); const pending = await PendingPayment.findOne({ discordId: targetId }); const target = await fetchUserFromAnyClient(targetId); if (!target) { await interaction.editReply({ content: "❌ Não encontrado!" }).catch(() => {}); return; } await confirmarPagamento(target, hours, interaction.channel, interaction.user.id, pending?.finalPrice || pending?.price, pending?.label, pending?.couponUsed); if (pending?.couponUsed) await consumeCoupon(pending.couponUsed, targetId); await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `✅ Confirmado!` }).catch(() => {}); return; }
     if (id.startsWith("pay_cancel_")) { await interaction.deferReply({ flags: 64 }).catch(() => {}); const targetId = id.replace("pay_cancel_", ""); const pending = await PendingPayment.findOne({ discordId: targetId }); if (!pending) { await interaction.editReply({ content: "❌ Não encontrado." }).catch(() => {}); return; } await PendingPayment.deleteOne({ discordId: targetId }); await interaction.editReply({ content: `🗑️ Cancelado.` }).catch(() => {}); return; }
-    
-    // 🔒 PROTEÇÃO: Verificação de admin ANTES de mostrar modal de criação de key
-    if (id === "logs_create" || id === "logs_lifetime") {
-        const userId = interaction.user.id;
-        if (!ADMIN_DISCORD_IDS.includes(String(userId))) {
-            console.error(`[SECURITY] 🚨 TENTATIVA NÃO-AUTORIZADA DE ACESSAR CRIAÇÃO DE KEY! User: ${interaction.user.tag} (${userId}) | Button: ${id}`);
-            
-            await IntruderAttempt.create({
-                type: 'UNAUTHORIZED_KEY_CREATION_ATTEMPT',
-                keyName: 'N/A',
-                hwid: 'discord-button',
-                discordId: userId,
-                ip: 'discord',
-                userAgent: 'Discord Bot',
-                details: `Usuário ${interaction.user.tag} tentou acessar botão ${id} sem autorização`
-            });
-            
-            await interaction.reply({ 
-                content: `🚨 **ACESSO NEGADO**\n\nApenas admins autorizados podem criar keys!\n\n✅ **Admins autorizados:**\n<@810259070211719268>\n<@1512847451483275531>`, 
-                flags: 64 
-            }).catch(() => {});
-            return;
-        }
-    }
-    
     const modalMap = { logs_create: buildModal_create, logs_lifetime: buildModal_lifetime, logs_revoke: buildModal_revoke, logs_pause: buildModal_pause, logs_reset: buildModal_reset, logs_addtime: buildModal_addtime, logs_setexpiry: buildModal_setexpiry, logs_transfer: buildModal_transfer, logs_sethwid: buildModal_sethwid, logs_lookup: buildModal_lookup, logs_unblock: buildModal_unblock, logs_cleanlogs: buildModal_cleanlogs };
     if (modalMap[id]) await interaction.showModal(modalMap[id]()).catch(() => {});
     } catch (e) {
@@ -3454,48 +2758,13 @@ async function handleLogsModal(interaction) {
         const h = parseInt(getField("key_h")) || 0;
         const m = parseInt(getField("key_m")) || 0;
         const ms = (h * 3600 + m * 60) * 1000;
-        
-        // 🔒 PROTEÇÃO: Apenas admins autorizados podem criar keys
-        const userId = interaction.user.id;
-        if (!ADMIN_DISCORD_IDS.includes(String(userId))) {
-            console.error(`[SECURITY] 🚨 TENTATIVA NÃO-AUTORIZADA DE CRIAR KEY! User: ${interaction.user.tag} (${userId}) | Key: ${name}`);
-            
-            await IntruderAttempt.create({
-                type: 'UNAUTHORIZED_KEY_CREATION',
-                keyName: name,
-                hwid: 'discord-action',
-                discordId: userId,
-                ip: 'discord',
-                userAgent: 'Discord Bot',
-                details: `Usuário ${interaction.user.tag} tentou criar key sem autorização`
-            });
-            
-            return interaction.editReply({ content: `❌ ACESSO NEGADO: Apenas admins autorizados podem criar keys!\n\n✅ Admins autorizados: <@810259070211719268>, <@1512847451483275531>` }).catch(() => {});
-        }
-        
-        const { msg } = await opCreateKey(name, ms, userId);
+        const { msg } = await opCreateKey(name, ms);
         return interaction.editReply({ content: msg }).catch(() => {});
     }
 
     if (id === "modal_lifetime") {
         const name = getField("key_name").trim();
-        
-        // 🔒 PROTEÇÃO: Apenas admins podem criar keys LIFETIME
-        if (!await isAdmin(interaction.member)) {
-            console.error(`[SECURITY] 🚨 Usuário NÃO-ADMIN tentou criar key LIFETIME! User: ${interaction.user.tag} (${interaction.user.id}) | Key: ${name}`);
-            
-            await IntruderAttempt.create({
-                type: 'UNAUTHORIZED_ACTION',
-                keyName: name,
-                hwid: 'discord-action',
-                discordId: interaction.user.id,
-                details: `Tentativa de criar key LIFETIME sem permissão | User: ${interaction.user.tag}`
-            });
-            
-            return interaction.editReply({ content: "❌ Você não tem permissão para criar keys LIFETIME!" }).catch(() => {});
-        }
-        
-        const { msg } = await opCreateLifetime(name, interaction.user.id, interaction.user.tag);
+        const { msg } = await opCreateLifetime(name);
         return interaction.editReply({ content: msg }).catch(() => {});
     }
 
@@ -3755,7 +3024,7 @@ if (DISCORD_TOKEN_PANEL) clientPanel.login(DISCORD_TOKEN_PANEL);
 if (DISCORD_TOKEN_PAYMENT) clientPayment.login(DISCORD_TOKEN_PAYMENT);
 
 // ─── NOVA ROTA: OBTER PREÇO POR HORA (PÚBLICO) ───────────────────────────────
-// Variável global para o preço por hora (padrão R$3.00)
+// Variável global para o preço por hora (padrão R$7.50)
 let PRICE_PER_HOUR = 3.00;
 
 app.get("/api/price", (req, res) => {
@@ -3842,287 +3111,6 @@ app.get("/api/admin/deposits/pending", requireAuth, requireAdminAuth, async (req
     }
 });
 
-// ─── NOVA ROTA: LISTAR AUDIT LOG (ADMIN) ────────────────────────────────────
-app.get("/api/admin/audit-log", requireAuth, requireAdminAuth, async (req, res) => {
-    try {
-        const limit = parseInt(req.query.limit) || 50;
-        const logs = await AuditLog.find().sort({ timestamp: -1 }).limit(limit);
-        res.json({ ok: true, logs });
-    } catch (e) {
-        console.error("[API] Erro em /api/admin/audit-log:", e.message);
-        res.status(500).json({ error: "Erro ao buscar logs" });
-    }
-});
-
-// ─── NOVA ROTA: LISTAR KEYS ATIVAS (ADMIN) — COM PROTEÇÃO ───────────────────
-app.get("/api/admin/list-keys", requireAuth, requireAdminAuth, async (req, res) => {
-    try {
-        const now = Date.now();
-        const allKeys = Object.entries(keys).map(([keyName, data]) => ({
-            keyName,
-            discordId: data.discordId,
-            expiry: data.expiry,
-            isLifetime: data.expiry === Infinity,
-            paused: data.paused,
-            hwid: data.hwid ? (data.hwid.substring(0, 10) + "...") : null, // Ofuscado
-            isAutoKey: data.isAutoKey,
-            timeLeft: data.expiry === Infinity ? "Infinity" : Math.max(0, data.expiry - now)
-        }));
-        
-        // ✅ AUDITORIA: Registra visualização de keys
-        await logAdminAction(
-            req.user.discordId,
-            req.user.discordTag,
-            "VIEW_ALL_KEYS",
-            { totalKeys: allKeys.length },
-            req.ip
-        );
-        
-        res.json({ ok: true, keys: allKeys, total: allKeys.length });
-    } catch (e) {
-        console.error("[API] Erro em /api/admin/list-keys:", e.message);
-        res.status(500).json({ error: "Erro ao listar keys" });
-    }
-});
-
-// ─── NOVA ROTA: DELETAR KEY (ADMIN) — COM AUDITORIA ─────────────────────────
-app.post("/api/admin/delete-key", requireAuth, requireAdminAuth, async (req, res) => {
-    try {
-        const { keyName } = req.body;
-        if (!keyName) return res.status(400).json({ error: "keyName é obrigatório" });
-        
-        const keyData = keys[keyName];
-        if (!keyData) return res.status(404).json({ error: "Key não encontrada" });
-        
-        // ✅ AUDITORIA: Registra deleção de key
-        await logAdminAction(
-            req.user.discordId,
-            req.user.discordTag,
-            "DELETE_KEY",
-            { keyName, wasLifetime: keyData.expiry === Infinity, discordId: keyData.discordId },
-            req.ip
-        );
-        
-        delete keys[keyName];
-        await deleteKey(keyName);
-        
-        console.log(`[SECURITY] Key deletada: ${keyName} por ${req.user.discordTag}`);
-        res.json({ ok: true, message: `Key ${keyName} deletada com sucesso` });
-    } catch (e) {
-        console.error("[API] Erro em /api/admin/delete-key:", e.message);
-        res.status(500).json({ error: "Erro ao deletar key" });
-    }
-});
-
-// ─── NOVA ROTA: LISTAR KEYS INFINITAS (ADMIN) ───────────────────────────────
-app.get("/api/admin/lifetime-keys", requireAuth, requireAdminAuth, async (req, res) => {
-    try {
-        const lifetimeKeys = Object.entries(keys)
-            .filter(([, data]) => data.expiry === Infinity)
-            .map(([keyName, data]) => ({
-                keyName,
-                discordId: data.discordId,
-                hwid: data.hwid ? (data.hwid.substring(0, 10) + "...") : null,
-                paused: data.paused,
-                isAutoKey: data.isAutoKey
-            }));
-        
-        // ✅ AUDITORIA: Registra visualização de keys infinitas
-        await logAdminAction(
-            req.user.discordId,
-            req.user.discordTag,
-            "VIEW_LIFETIME_KEYS",
-            { totalLifetime: lifetimeKeys.length },
-            req.ip
-        );
-        
-        res.json({ ok: true, keys: lifetimeKeys, total: lifetimeKeys.length });
-    } catch (e) {
-        console.error("[API] Erro em /api/admin/lifetime-keys:", e.message);
-        res.status(500).json({ error: "Erro ao listar keys infinitas" });
-    }
-});
-
-// ─── NOVA ROTA: LISTAR TENTATIVAS DE INTRUSÃO (ADMIN) ───────────────────────
-app.get("/api/admin/intrusion-attempts", requireAuth, requireAdminAuth, async (req, res) => {
-    try {
-        const limit = parseInt(req.query.limit) || 50;
-        const attempts = await IntruderAttempt.find().sort({ timestamp: -1 }).limit(limit);
-        
-        const enriched = attempts.map(a => ({
-            keyName: a.keyName,
-            hwid: a.hwid ? (a.hwid.substring(0, 16) + "...") : 'unknown',
-            hwidFull: a.hwid, // Para investigação
-            attemptType: a.attemptType,
-            keyDiscordId: a.keyDiscordId,
-            ip: a.ip,
-            blocked: a.blocked,
-            timestamp: a.timestamp
-        }));
-        
-        // ✅ AUDITORIA
-        await logAdminAction(
-            req.user.discordId,
-            req.user.discordTag,
-            "VIEW_INTRUSION_ATTEMPTS",
-            { total: attempts.length },
-            req.ip
-        );
-        
-        res.json({ ok: true, attempts: enriched, total: attempts.length });
-    } catch (e) {
-        console.error("[API] Erro em /api/admin/intrusion-attempts:", e.message);
-        res.status(500).json({ error: "Erro ao listar tentativas de intrusão" });
-    }
-});
-
-// ─── NOVA ROTA: INTRUSÕES POR KEY ESPECÍFICA ────────────────────────────────
-app.get("/api/admin/intrusion-by-key/:keyName", requireAuth, requireAdminAuth, async (req, res) => {
-    try {
-        const { keyName } = req.params;
-        const attempts = await IntruderAttempt.find({ keyName }).sort({ timestamp: -1 });
-        
-        const enriched = attempts.map(a => ({
-            hwid: a.hwid ? (a.hwid.substring(0, 16) + "...") : 'unknown',
-            hwidFull: a.hwid,
-            attemptType: a.attemptType,
-            ip: a.ip,
-            userAgent: a.userAgent,
-            blocked: a.blocked,
-            timestamp: a.timestamp
-        }));
-        
-        res.json({ ok: true, keyName, attempts: enriched, total: attempts.length });
-    } catch (e) {
-        console.error("[API] Erro em /api/admin/intrusion-by-key:", e.message);
-        res.status(500).json({ error: "Erro ao buscar intrusões" });
-    }
-});
-
-// ─── NOVA ROTA: ESTATÍSTICAS DE SEGURANÇA ───────────────────────────────────
-app.get("/api/admin/security-stats", requireAuth, requireAdminAuth, async (req, res) => {
-    try {
-        const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        
-        const stats = {
-            last24h: {
-                total: await IntruderAttempt.countDocuments({ timestamp: { $gte: last24h } }),
-                invalidKey: await IntruderAttempt.countDocuments({ timestamp: { $gte: last24h }, attemptType: 'INVALID_KEY' }),
-                blacklistedHwid: await IntruderAttempt.countDocuments({ timestamp: { $gte: last24h }, attemptType: 'BLACKLISTED_HWID' }),
-                blacklistedKey: await IntruderAttempt.countDocuments({ timestamp: { $gte: last24h }, attemptType: 'BLACKLISTED_KEY' }),
-                hwidMismatch: await IntruderAttempt.countDocuments({ timestamp: { $gte: last24h }, attemptType: 'HWID_MISMATCH' })
-            },
-            allTime: {
-                total: await IntruderAttempt.countDocuments(),
-                blacklistedHwids: await BlacklistedHWID.countDocuments(),
-                blacklistedUsers: await User.countDocuments({ blacklisted: true })
-            }
-        };
-        
-        res.json({ ok: true, stats });
-    } catch (e) {
-        console.error("[API] Erro em /api/admin/security-stats:", e.message);
-        res.status(500).json({ error: "Erro ao buscar estatísticas" });
-    }
-});
-
-// ─── NOVA ROTA: LISTAR HWIDs BANIDOS (ADMIN) ────────────────────────────────
-app.get("/api/admin/blacklisted-hwids", requireAuth, requireAdminAuth, async (req, res) => {
-    try {
-        const hwids = await BlacklistedHWID.find().sort({ bannedAt: -1 });
-        
-        const enriched = hwids.map(h => ({
-            hwid: h.hwid.substring(0, 16) + "...", // Parcialmente ofuscado
-            hwidFull: h.hwid, // Full para deletar
-            reason: h.reason,
-            bannedBy: h.bannedByTag,
-            originalDiscordId: h.originalDiscordId,
-            bannedAt: h.bannedAt
-        }));
-        
-        // ✅ AUDITORIA
-        await logAdminAction(
-            req.user.discordId,
-            req.user.discordTag,
-            "VIEW_BLACKLISTED_HWIDS",
-            { total: hwids.length },
-            req.ip
-        );
-        
-        res.json({ ok: true, hwids: enriched, total: hwids.length });
-    } catch (e) {
-        console.error("[API] Erro em /api/admin/blacklisted-hwids:", e.message);
-        res.status(500).json({ error: "Erro ao listar HWIDs banidos" });
-    }
-});
-
-// ─── NOVA ROTA: BANIR HWID DIRETAMENTE (ADMIN) ──────────────────────────────
-app.post("/api/admin/blacklist-hwid", requireAuth, requireAdminAuth, async (req, res) => {
-    try {
-        const { hwid, reason } = req.body;
-        
-        if (!hwid) {
-            return res.status(400).json({ error: "HWID é obrigatório" });
-        }
-        
-        const alreadyBanned = await BlacklistedHWID.findOne({ hwid });
-        if (alreadyBanned) {
-            return res.status(400).json({ error: "HWID já está na blacklist" });
-        }
-        
-        await BlacklistedHWID.create({
-            hwid,
-            originalDiscordId: 'unknown',
-            reason: reason || 'Banimento manual por admin',
-            bannedAt: new Date()
-        });
-        
-        // ✅ AUDITORIA
-        await logAdminAction(
-            req.user.discordId,
-            req.user.discordTag,
-            "BAN_HWID_DIRECT",
-            { hwid: hwid.substring(0, 16) + "...", reason },
-            req.ip
-        );
-        
-        console.log(`[SECURITY] 🚨 HWID BANIDO DIRETAMENTE: ${hwid.substring(0, 16)}... por ${req.user.discordTag} | Motivo: ${reason || 'Manual'}`);
-        
-        res.json({ ok: true, message: "HWID banido globalmente" });
-    } catch (e) {
-        console.error("[API] Erro em /api/admin/blacklist-hwid:", e.message);
-        res.status(500).json({ error: "Erro ao banir HWID" });
-    }
-});
-
-// ─── NOVA ROTA: REMOVER HWID DA BLACKLIST (ADMIN) ───────────────────────────
-app.post("/api/admin/unban-hwid", requireAuth, requireAdminAuth, async (req, res) => {
-    try {
-        const { hwid } = req.body;
-        if (!hwid) return res.status(400).json({ error: "HWID é obrigatório" });
-        
-        const banned = await BlacklistedHWID.findOneAndDelete({ hwid });
-        if (!banned) {
-            return res.status(404).json({ error: "HWID não encontrado na blacklist" });
-        }
-        
-        // ✅ AUDITORIA
-        await logAdminAction(
-            req.user.discordId,
-            req.user.discordTag,
-            "UNBAN_HWID",
-            { hwid: hwid.substring(0, 16) + "...", originalDiscordId: banned.originalDiscordId },
-            req.ip
-        );
-        
-        console.log(`[SECURITY] HWID removido da blacklist: ${hwid.substring(0, 16)}... por ${req.user.discordTag}`);
-        res.json({ ok: true, message: "HWID removido da blacklist" });
-    } catch (e) {
-        console.error("[API] Erro em /api/admin/unban-hwid:", e.message);
-        res.status(500).json({ error: "Erro ao remover HWID" });
-    }
-});
-
 // ─── NOVA ROTA: BLACKLIST USER (ADMIN) — por Discord ID ─────────────────────
 app.post("/api/admin/blacklist", requireAuth, requireAdminAuth, async (req, res) => {
     try {
@@ -4135,15 +3123,6 @@ app.post("/api/admin/blacklist", requireAuth, requireAdminAuth, async (req, res)
         if (!reason || reason.trim() === "") {
             return res.status(400).json({ error: "Motivo do banimento é obrigatório" });
         }
-        
-        // ✅ AUDITORIA: Registra ação de blacklist
-        await logAdminAction(
-            req.user.discordId, 
-            req.user.discordTag, 
-            "BLACKLIST_USER", 
-            { discordId, reason },
-            req.ip
-        );
 
         const user = await User.findOne({ discordId: String(discordId) });
         if (!user) {
@@ -4167,41 +3146,16 @@ app.post("/api/admin/blacklist", requireAuth, requireAdminAuth, async (req, res)
         // Se o usuário tiver uma key ativa, bane ela também (trava o uso no jogo)
         const keyEntry = Object.entries(keys).find(([, d]) => d.discordId === String(discordId));
         let keyName = null;
-        let bannedHWID = null;
-        
         if (keyEntry) {
             keyName = keyEntry[0];
-            bannedHWID = keys[keyName].hwid; // Captura o HWID antes de banir
-            
             keys[keyName].blacklisted = true;
             keys[keyName].blacklistReason = reason.trim();
             keys[keyName].blacklistedAt = new Date();
             keys[keyName].hwidLocked = true; // Trava o HWID também
             await saveKey(keyName);
-            
-            // ✅ BANE O HWID GLOBALMENTE (previne usar com outras contas/VPN)
-            if (bannedHWID) {
-                try {
-                    await BlacklistedHWID.findOneAndUpdate(
-                        { hwid: bannedHWID },
-                        {
-                            hwid: bannedHWID,
-                            reason: reason.trim(),
-                            bannedBy: req.user.discordId,
-                            bannedByTag: req.user.discordTag,
-                            originalDiscordId: String(discordId),
-                            bannedAt: new Date()
-                        },
-                        { upsert: true, new: true }
-                    );
-                    console.log(`[SECURITY] 🚨 HWID GLOBALMENTE BANIDO: ${bannedHWID.substring(0, 16)}...`);
-                } catch (e) {
-                    console.error("[SECURITY] Erro ao banir HWID:", e.message);
-                }
-            }
         }
 
-        console.log(`[ADMIN] ⛔ Usuário BANIDO: ${discordId} (${user.discordTag}) | Key: ${keyName || "nenhuma"} | HWID: ${bannedHWID ? 'BANIDO' : 'nenhum'} | Motivo: ${reason}`);
+        console.log(`[ADMIN] ⛔ Usuário BANIDO: ${discordId} (${user.discordTag}) | Key: ${keyName || "nenhuma"} | Motivo: ${reason}`);
 
         // Envia notificação no canal de logs
         if (LOGS_CHANNEL_ID && clientLogs.isReady()) {
@@ -4347,141 +3301,12 @@ process.on("uncaughtException", (err) => {
 });
 
 // Socket.io para atualizações em tempo real
-// 🔒 Mapa de conexões ativas por key (previne múltiplas conexões simultâneas)
-const activeSocketConnections = new Map(); // keyName -> socket.id
-
-// 🔒 Rate limiting: tentativas de conexão por IP
-const socketConnectionAttempts = new Map(); // ip -> { count, lastAttempt }
-const SOCKET_RATE_LIMIT = 5; // máximo de tentativas
-const SOCKET_RATE_WINDOW = 60000; // 1 minuto
-
-// 🔒 AUTENTICAÇÃO: Middleware para verificar token/key antes de permitir conexão
-io.use((socket, next) => {
-    const ip = socket.handshake.address || socket.request.connection.remoteAddress || 'unknown';
-    const token = socket.handshake.auth.token;
-    const keyHeader = socket.handshake.auth.key;
-    const keyQuery = socket.handshake.query.key;  // Key via URL query param (Roblox)
-    
-    // ✅ RATE LIMITING por IP
-    const now = Date.now();
-    const attempts = socketConnectionAttempts.get(ip) || { count: 0, lastAttempt: 0 };
-    
-    if (now - attempts.lastAttempt < SOCKET_RATE_WINDOW) {
-        if (attempts.count >= SOCKET_RATE_LIMIT) {
-            console.error(`[SOCKET.IO] 🚨 RATE LIMIT! IP bloqueado temporariamente: ${ip}`);
-            return next(new Error("Muitas tentativas de conexão. Tente novamente em 1 minuto."));
-        }
-        attempts.count++;
-    } else {
-        attempts.count = 1;
-    }
-    attempts.lastAttempt = now;
-    socketConnectionAttempts.set(ip, attempts);
-    
-    // Permite conexão se tiver token JWT válido (usuário logado no site)
-    if (token) {
-        try {
-            jwt.verify(token, JWT_SECRET);
-            console.log(`[SOCKET.IO] ✅ Cliente autenticado via JWT | IP: ${ip}`);
-            socket.data.isWebUser = true;
-            socket.data.ip = ip;
-            return next();
-        } catch (e) {
-            console.warn(`[SOCKET.IO] ⚠️ Token JWT inválido | IP: ${ip}`);
-        }
-    }
-    
-    // Permite conexão se tiver key válida via header (script Roblox)
-    if (keyHeader) {
-        const keyName = findKey(keyHeader);
-        if (keyName && keys[keyName]) {
-            // ✅ VERIFICAÇÃO: Já existe conexão ativa com essa key?
-            if (activeSocketConnections.has(keyName)) {
-                console.error(`[SOCKET.IO] 🚨 BLOQUEADO! Key já está em uso: ${keyName} | IP tentando: ${ip}`);
-                
-                // Registra tentativa suspeita
-                IntruderAttempt.create({
-                    type: 'UNAUTHORIZED_ACTION',
-                    keyName: keyName,
-                    hwid: 'socket-connection',
-                    discordId: keys[keyName].discordId || 'unknown',
-                    ip: ip,
-                    userAgent: socket.handshake.headers['user-agent'] || 'unknown',
-                    details: `Tentativa de conectar Socket.io com key já em uso | IP: ${ip}`
-                }).catch(e => console.error('[SOCKET.IO] Erro ao registrar intrusão:', e.message));
-                
-                return next(new Error("Esta key já está sendo usada por outro cliente"));
-            }
-            
-            console.log(`[SOCKET.IO] ✅ Cliente autenticado via Key (header): ${keyName} | IP: ${ip}`);
-            socket.data.keyName = keyName;
-            socket.data.ip = ip;
-            return next();
-        } else {
-            console.error(`[SOCKET.IO] 🚨 BLOQUEADO! Key inválida (header): ${keyHeader} | IP: ${ip}`);
-        }
-    }
-    
-    // Permite conexão se tiver key válida via query param (script Roblox - método principal)
-    if (keyQuery) {
-        const keyName = findKey(keyQuery);
-        if (keyName && keys[keyName]) {
-            // ✅ VERIFICAÇÃO: Já existe conexão ativa com essa key?
-            if (activeSocketConnections.has(keyName)) {
-                const existingSocketId = activeSocketConnections.get(keyName);
-                console.error(`[SOCKET.IO] 🚨 BLOQUEADO! Key já está em uso: ${keyName} | Socket existente: ${existingSocketId} | IP tentando: ${ip}`);
-                
-                // Registra tentativa suspeita
-                IntruderAttempt.create({
-                    type: 'UNAUTHORIZED_ACTION',
-                    keyName: keyName,
-                    hwid: 'socket-connection',
-                    discordId: keys[keyName].discordId || 'unknown',
-                    ip: ip,
-                    userAgent: socket.handshake.headers['user-agent'] || 'unknown',
-                    details: `Tentativa de conectar Socket.io com key já em uso | IP: ${ip}`
-                }).catch(e => console.error('[SOCKET.IO] Erro ao registrar intrusão:', e.message));
-                
-                return next(new Error("Esta key já está sendo usada por outro cliente"));
-            }
-            
-            console.log(`[SOCKET.IO] ✅ Cliente autenticado via Key (query): ${keyName} | IP: ${ip}`);
-            socket.data.keyName = keyName;
-            socket.data.ip = ip;
-            return next();
-        } else {
-            console.error(`[SOCKET.IO] 🚨 BLOQUEADO! Key inválida (query): ${keyQuery} | IP: ${ip}`);
-        }
-    }
-    
-    // Bloqueia conexão não autenticada
-    console.error(`[SOCKET.IO] 🚨 BLOQUEADO! Conexão sem autenticação | IP: ${ip}`);
-    return next(new Error("Autenticação necessária"));
-});
-
 io.on("connection", (socket) => {
-    const keyName = socket.data.keyName || 'Web User';
-    const ip = socket.data.ip || 'unknown';
-    const isWebUser = socket.data.isWebUser || false;
-    
-    // ✅ Registra conexão ativa (apenas para keys, não para web users)
-    if (keyName !== 'Web User') {
-        activeSocketConnections.set(keyName, socket.id);
-        console.log(`[SOCKET.IO] Cliente conectado: ${keyName} | IP: ${ip} | Socket ID: ${socket.id}`);
-    } else {
-        console.log(`[SOCKET.IO] Cliente conectado: Web User | IP: ${ip} | Socket ID: ${socket.id}`);
-    }
-    
+    console.log("Cliente conectado ao Socket.io");
     socket.emit("brainrots", brainrots);
     socket.emit("presence", Object.values(presence).filter(p => Date.now() - p.lastSeen < ONLINE_STALE_MS));
 
     socket.on("disconnect", () => {
-        // ✅ Remove conexão ativa
-        if (keyName !== 'Web User' && activeSocketConnections.get(keyName) === socket.id) {
-            activeSocketConnections.delete(keyName);
-            console.log(`[SOCKET.IO] Cliente desconectado: ${keyName} | IP: ${ip}`);
-        } else {
-            console.log(`[SOCKET.IO] Cliente desconectado: Web User | IP: ${ip}`);
-        }
+        console.log("Cliente desconectado do Socket.io");
     });
 });

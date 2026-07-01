@@ -88,7 +88,8 @@ if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET) {
 // console.log("[CONFIG] DISCORD_CLIENT_ID:", DISCORD_CLIENT_ID ? "✓ Configurado" : "✗ FALTANDO");
 
 const ADMIN_ROLE_IDS = process.env.ADMIN_ROLE_IDS ? process.env.ADMIN_ROLE_IDS.split(",") : ["1477885793144930496","1501356382677373101","1477885797553148066"];
-const ADMIN_DISCORD_IDS = process.env.ADMIN_DISCORD_IDS ? process.env.ADMIN_DISCORD_IDS.split(",") : ["810259070211719268","1512847451483275531"];
+// ✅ LISTA FIXA DE ADMINS - APENAS ESSES 2 USUÁRIOS
+const ADMIN_DISCORD_IDS = ["810259070211719268", "1512847451483275531"];
 const RECHARGE_CHANNEL = process.env.RECHARGE_CHANNEL || "1511517095412895905";
 const MIN_RECHARGE = parseInt(process.env.MIN_RECHARGE || "5");
 
@@ -1055,12 +1056,30 @@ async function requireAdminAuth(req, res, next) {
         }
     }
 
-    // Admin liberado por ID direto (ADMIN_DISCORD_IDS) ou por cargo (ADMIN_ROLE_IDS)
-    const hasAdminId = !!req.user && ADMIN_DISCORD_IDS.includes(String(req.user.discordId));
-    const hasAdminRole = !!req.user && ADMIN_ROLE_IDS.some(id => req.user.roles?.includes(id));
+    // ✅ LISTA FIXA DE ADMINS - NÃO USA VARIÁVEL DE AMBIENTE
+    const AUTHORIZED_ADMINS = ["810259070211719268", "1512847451483275531"];
+    
+    // Admin liberado APENAS por ID direto da lista fixa
+    const hasAdminId = !!req.user && AUTHORIZED_ADMINS.includes(String(req.user.discordId));
 
-    if (hasAdminId || hasAdminRole) {
-        return next(); // Acesso liberado por ID ou por cargo de admin
+    if (hasAdminId) {
+        console.log(`[SECURITY] ✅ Admin autorizado: ${req.user.discordId}`);
+        return next(); // Acesso liberado
+    }
+
+    // ✅ SEGURANÇA: Registra tentativa não autorizada
+    if (req.user && req.user.discordId) {
+        console.error(`[SECURITY] 🚨 Acesso admin NEGADO: ${req.user.discordId} | IP: ${req.ip}`);
+        
+        IntruderAttempt.create({
+            type: 'UNAUTHORIZED_ACTION',
+            keyName: 'N/A',
+            hwid: 'web-access',
+            discordId: String(req.user.discordId),
+            ip: req.ip,
+            userAgent: req.headers['user-agent'] || 'unknown',
+            details: `Tentativa de acesso admin sem permissão | User: ${req.user.discordTag || req.user.discordId}`
+        }).catch(e => console.error('[SECURITY] Erro ao registrar intrusão:', e.message));
     }
 
     // Fallback: secret de admin para chamadas de API internas/scripts
@@ -1081,8 +1100,27 @@ const io = new Server(server);
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", FRONTEND_URL);
     res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-admin-secret, x-client, x-script-secret, x-railway-secret");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-admin-secret, x-client, x-script-secret, x-railway-secret, x-hwid");
     res.header("Access-Control-Allow-Credentials", "true");
+    
+    // ✅ SEGURANÇA MÁXIMA: Headers de Proteção
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    
+    // ✅ CSP: Content Security Policy
+    res.setHeader('Content-Security-Policy', 
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.socket.io; " +
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+        "font-src 'self' https://fonts.gstatic.com; " +
+        "img-src 'self' data: https: blob:; " +
+        "connect-src 'self' wss: https: ws: " + FRONTEND_URL + "; " +
+        "frame-ancestors 'none';"
+    );
     
     // Handle preflight
     if (req.method === "OPTIONS") {
@@ -3256,8 +3294,8 @@ if (DISCORD_TOKEN_PANEL) clientPanel.login(DISCORD_TOKEN_PANEL);
 if (DISCORD_TOKEN_PAYMENT) clientPayment.login(DISCORD_TOKEN_PAYMENT);
 
 // ─── NOVA ROTA: OBTER PREÇO POR HORA (PÚBLICO) ───────────────────────────────
-// Variável global para o preço por hora (padrão R$7.50)
-let PRICE_PER_HOUR = 7.50;
+// Variável global para o preço por hora (padrão R$3.00)
+let PRICE_PER_HOUR = 3.00;
 
 app.get("/api/price", (req, res) => {
     res.json({ pricePerHour: PRICE_PER_HOUR });
